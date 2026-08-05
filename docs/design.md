@@ -1,122 +1,74 @@
-# nimorm Phase 1 design
+# Architecture and design
 
-## Scope
+## Goals
 
-Phase 1 implements and verifies the compile-time model declaration boundary. It
-does not connect to a database and does not claim CRUD, query-builder, relation,
-schema-generation, or migration support.
+nimorm keeps application-facing values idiomatic Nim while moving model
+structure and type mistakes to compilation. Runtime layers consume immutable
+metadata and typed values; they do not inspect arbitrary objects or keep a
+second mutable field graph.
 
-## DSL and observed Nim AST
+## Compile-time boundary
 
-`model` is an untyped block macro. A probe compiled with Nim 2.2.4 showed these
-relevant shapes (irrelevant children omitted):
+`model_macro.nim` parses the `model` block, validates its AST, and emits:
+
+- an exported native object type;
+- an immutable `ModelMeta` constant and typedesc accessor;
+- encode/decode and insert/update preparation procs;
+- typed `FieldRef` and `RelationRef` sets;
+- field-specific validation code.
+
+Nullable values are `Option[T]`. Relations store IDs. This keeps normal object
+construction, assignment, generics, and compiler type checking available to
+application code.
+
+The macro is deliberately strict about accepted literal syntax. Clear
+model/field/option diagnostics are preferable to accepting arbitrary
+expressions that later fail during code generation.
+
+## Runtime layers
 
 ```text
-Command
-  Ident "model"
-  Ident "Post"
-  StmtList
-    Asgn
-      Ident "title"
-      Call
-        Ident "stringField"
-        ExprEqExpr
-          Ident "maxLength"
-          IntLit 200
-    Call
-      Ident "meta"
-      StmtList
-        Asgn
-          Ident "tableName"
-          StrLit "posts"
+native model object
+  -> generated serialization / validation / field references
+  -> CRUD, QuerySet, relation, and migration APIs
+  -> backend-neutral metadata, AST, and DbValue parameters
+  -> SQLite or optional PostgreSQL execution
 ```
 
-The implementation deliberately matches and validates those nodes. It reports
-errors with model and field context instead of accepting arbitrary Nim
-expressions and failing later during semantic analysis.
+`DbValue` is the execution boundary for NULL, integers, floats, text, and
+binary data. Sensitive marking is metadata on a parameter; backends redact a
+copy for logging and bind the original value.
 
-## Generated code
+The query builder stores an AST until a terminal operation. Compilation quotes
+metadata-derived identifiers, escapes LIKE patterns, and emits placeholders
+plus a separate parameter sequence. It never interpolates runtime values.
 
-Conceptually, this declaration:
+## Schema and migrations
 
-```nim
-model Post:
-  title = stringField(maxLength = 200)
-  body = textField()
-```
+The same `ModelMeta` drives SQLite/PostgreSQL DDL and versioned schema
+snapshots. Migration diffs are data: operations carry safety classifications,
+reasons, dependencies, and backend-independent field/model snapshots.
 
-emits the equivalent of:
+Execution preflights every safety gate, checks history/dependencies, compiles
+for the selected dialect, then applies statements and the history row inside a
+transaction. SQLite rebuild-required operations fail explicitly because data
+copying and casting need application decisions.
 
-```nim
-type Post* = object
-  id*: int64
-  title*: string
-  body*: string
+## Backend boundary
 
-const PostModelMeta* = ModelMeta(...)
-```
+SQLite is linked through `db_connector/sqlite3`. PostgreSQL is behind
+`-d:nimormPostgres` and uses libpq parameter execution. The public database
+contract is synchronous; introducing async behavior would require different
+connection ownership and result lifetimes, so it is not mixed into this API.
 
-It also emits a typedesc-specific metadata accessor used by the public generic
-APIs. Nullable fields are `Option[T]`; non-null fields are exactly `T`. Field
-declarations are macro input and never survive as runtime wrapper objects.
+## Compatibility and extension points
 
-Unless `meta.autoPrimaryKey = false` or an explicit primary key exists, the
-macro inserts a native `int64` `id` field. This policy is recorded in metadata
-so schema generation can consume the same decision in a later phase.
+The largest compatibility risk is a future Nim parser changing AST shapes used
+by the DSL. Compile-failure fixtures and generated-code tests make that boundary
+visible. The clean extension points are new field mappings, query AST nodes,
+additional backend implementations, eager-loading planners, and a reviewed
+SQLite table-rebuild operation.
 
-## Metadata storage
-
-Each model owns an exported immutable `ModelNameModelMeta` constant. Public
-lookups are typedesc based:
-
-```nim
-getModelMeta(Post)
-getFieldMeta(Post, "title")
-tableName(Post)
-primaryKeyField(Post)
-```
-
-The model constant is usable in `static` assertions. A runtime string lookup is
-provided only where the requested API itself uses a string; generated CRUD and
-query code can consume typed metadata directly in later phases.
-
-## Macro versus pragma
-
-A pragma can annotate an existing declaration, but the intended DSL needs to
-own a block grammar and generate both a native type and related metadata. A
-macro therefore provides one validation point, clearer diagnostics, and a
-single source of truth. Adding pragmas would not remove the need for a macro and
-would split field information between two syntactic mechanisms.
-
-## Validation and diagnostics
-
-Phase 1 supports `stringField` and `textField`. It validates field syntax,
-supported options, duplicate identifiers and columns, required positive
-`maxLength`, length bounds, null primary keys, meta syntax, ordering fields,
-composite constraints, and indexes at compile time. Errors include the model,
-field, and option whenever applicable.
-
-Identifiers are compared with Nim-style normalization (case-insensitive and
-underscore-insensitive) to catch declarations that the compiler itself would
-treat as collisions.
-
-## Extension boundaries and risks
-
-- `field_defs.nim` owns stable field-kind vocabulary.
-- `metadata.nim` contains backend-independent descriptions and lookup APIs.
-- `model_macro.nim` alone parses DSL AST and generates native declarations.
-- Database execution and SQL dialects will live outside all three modules.
-
-The primary compatibility risk is a future Nim release changing parser AST
-shapes. The recorded probe and compile-failure fixtures make that visible.
-Relations require symbol resolution and cycle handling and are intentionally a
-later phase. Default values also need coordinated construction/insert semantics;
-accepting them only as decorative metadata in Phase 1 would be misleading, so
-they are not yet accepted.
-
-## Phase 2 hazards
-
-SQLite CRUD must preserve parameterized values, distinguish structured database
-errors, serialize `Option` correctly, assign auto-generated IDs without Field
-wrappers, and keep SQLite-specific behavior behind a backend boundary. Those
-requirements are not implemented by Phase 1.
+Current non-goals are runtime model discovery, hidden lazy relation queries,
+implicit validation on persistence, asynchronous wrappers around blocking
+calls, and automatic destructive migrations.
