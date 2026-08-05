@@ -31,6 +31,22 @@ proc requireKind(value: DbValue; kinds: set[DbValueKind]; target: string) =
     raise newException(SerializationError,
       "cannot decode " & $value.kind & " as " & target)
 
+proc parseDateTimeValue(value: string): DateTime =
+  const formats = [
+    "yyyy-MM-dd'T'HH:mm:ss'.'fffzzz",
+    "yyyy-MM-dd HH:mm:ss'.'fffzzz",
+    "yyyy-MM-dd HH:mm:sszzz",
+    "yyyy-MM-dd'T'HH:mm:sszzz",
+    "yyyy-MM-dd HH:mm:ss"
+  ]
+  for format in formats:
+    try:
+      return times.parse(value, format)
+    except ValueError:
+      discard
+  raise newException(SerializationError,
+    "invalid DateTime database value: " & value)
+
 proc fromDbValue*[T](value: DbValue; target: typedesc[T]): T =
   when T is Option:
     type Inner = typeof(default(T).get)
@@ -72,8 +88,7 @@ proc fromDbValue*[T](value: DbValue; target: typedesc[T]): T =
     result = parseDate(value.textValue)
   elif T is DateTime:
     requireKind(value, {dvText}, "DateTime")
-    result = times.parse(value.textValue,
-      "yyyy-MM-dd'T'HH:mm:ss'.'fffzzz")
+    result = parseDateTimeValue(value.textValue)
   elif T is JsonNode:
     requireKind(value, {dvText}, "JsonNode")
     result = parseJson(value.textValue)

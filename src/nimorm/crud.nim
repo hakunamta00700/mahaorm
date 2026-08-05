@@ -1,7 +1,7 @@
 import std/[options, sequtils, strutils]
 
 import ./backends/base
-import ./backends/sqlite
+import ./database
 import ./errors
 import ./metadata
 import ./schema/generator
@@ -39,10 +39,18 @@ proc insert*[T](db: Database; value: T): T =
         markers.add(parameterMarker(db, index))
       "INSERT INTO " & quoteIdentifier(meta.tableName, db.backend) &
         " (" & columns & ") VALUES (" & markers.join(", ") & ")"
-  discard db.execute(sqlText, encoded.values)
   let primaryKey = primaryKeyMeta(meta)
-  if primaryKey.autoIncrement:
-    nimOrmSetGeneratedPrimaryKey(result, db.lastInsertId())
+  if primaryKey.autoIncrement and db.backend == postgresBackend:
+    let rows = db.queryRows(sqlText & " RETURNING " &
+      quoteIdentifier(primaryKey.columnName, db.backend), encoded.values)
+    if rows.len != 1 or rows[0].len != 1:
+      raise newException(SqlExecutionError,
+        meta.modelName & ": INSERT RETURNING did not return one generated ID")
+    nimOrmSetGeneratedPrimaryKey(result, rows[0][0].integerValue)
+  else:
+    discard db.execute(sqlText, encoded.values)
+    if primaryKey.autoIncrement:
+      nimOrmSetGeneratedPrimaryKey(result, db.lastInsertId())
 
 proc get*[T](db: Database; modelType: typedesc[T]; primaryKey: DbValue): T =
   mixin nimOrmDecode

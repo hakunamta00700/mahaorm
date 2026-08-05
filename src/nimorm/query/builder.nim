@@ -1,6 +1,7 @@
 import std/[options, sequtils, strutils]
 
-import ../backends/[base, sqlite]
+import ../backends/base
+import ../database
 import ../errors
 import ../metadata
 import ../schema/generator

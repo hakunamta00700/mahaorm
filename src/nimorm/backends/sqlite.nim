@@ -82,8 +82,8 @@ proc readColumn(statement: PStmt; column: int32): DbValue =
     let text = column_text(statement, column)
     dbValue(if text.isNil: "" else: $text)
 
-proc execute*(db: Database; sqlText: string;
-              params: openArray[DbValue] = []): int =
+proc executeSqlite*(db: Database; sqlText: string;
+                    params: openArray[DbValue] = []): int =
   let handle = db.sqliteHandle
   let statement = db.prepare(sqlText, params)
   try:
@@ -94,8 +94,8 @@ proc execute*(db: Database; sqlText: string;
   finally:
     discard finalize(statement)
 
-proc queryRows*(db: Database; sqlText: string;
-                params: openArray[DbValue] = []): seq[DbRow] =
+proc queryRowsSqlite*(db: Database; sqlText: string;
+                      params: openArray[DbValue] = []): seq[DbRow] =
   let handle = db.sqliteHandle
   let statement = db.prepare(sqlText, params)
   try:
@@ -114,7 +114,7 @@ proc queryRows*(db: Database; sqlText: string;
   finally:
     discard finalize(statement)
 
-proc lastInsertId*(db: Database): int64 =
+proc lastInsertIdSqlite*(db: Database): int64 =
   last_insert_rowid(db.sqliteHandle)
 
 proc openSqlite*(path: string): Database =
@@ -129,13 +129,13 @@ proc openSqlite*(path: string): Database =
     raise newException(ConnectionError, message)
   result = Database(backend: sqliteBackend, handle: cast[pointer](handle))
   try:
-    discard result.execute("PRAGMA foreign_keys = ON")
+    discard result.executeSqlite("PRAGMA foreign_keys = ON")
   except:
     discard sqlite3.close(handle)
     result.closed = true
     raise
 
-proc close*(db: Database) =
+proc closeSqlite*(db: Database) =
   if db.isNil or db.closed:
     return
   if db.backend != sqliteBackend:
@@ -146,7 +146,7 @@ proc close*(db: Database) =
   db.closed = true
   db.handle = nil
 
-proc createTable*(db: Database; meta: ModelMeta) =
+proc createTableSqlite*(db: Database; meta: ModelMeta) =
   for statement in schemaSql(meta, sqliteBackend).split(";\n"):
     if statement.strip.len > 0:
-      discard db.execute(statement)
+      discard db.executeSqlite(statement)

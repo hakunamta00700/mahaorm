@@ -1,5 +1,5 @@
 import ./backends/base
-import ./backends/sqlite
+import ./database
 import ./errors
 
 proc savepointName(depth: int): string =

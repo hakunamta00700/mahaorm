@@ -8,6 +8,7 @@ requires "nim >= 2.0.0"
 requires "db_connector >= 0.1.0"
 
 task test, "Run the Phase 1 test suite":
+  exec "nim check --hints:off -d:nimormPostgres --path:src src/nimorm.nim"
   exec "nim c -r --hints:off --path:src tests/test_model_dsl.nim"
   exec "nim c -r --hints:off --path:src tests/test_compile_failures.nim"
   exec "nim c -r --hints:off --path:src tests/test_schema.nim"
@@ -15,6 +16,7 @@ task test, "Run the Phase 1 test suite":
   exec "nim c -r --hints:off --path:src tests/test_crud.nim"
   exec "nim c -r --hints:off --path:src tests/test_query_builder.nim"
   exec "nim c -r --hints:off --path:src tests/test_relations.nim"
+  exec "nim c -r --hints:off --path:src tests/test_postgres_backend.nim"
 
 task example, "Compile and run the basic model example":
   exec "nim c -r --hints:off --path:src examples/basic_model.nim"
