@@ -5,6 +5,7 @@ import ./field_defs
 import ./metadata
 import ./serialization
 import ./types
+import ./query/expressions
 
 type
   ParsedField = object
@@ -661,6 +662,35 @@ macro model*(name: untyped; body: untyped): untyped =
     ],
     body = setPrimaryKeyBody)
 
-  result = newStmtList(modelType, metadataConst, accessor, encodeProc,
+  let fieldSetName = ident(modelName & "Fields")
+  var fieldSetRecords = newNimNode(nnkRecList)
+  var fieldSetConstructor = newTree(nnkObjConstr, fieldSetName)
+  for field in fields:
+    var nativeField = field
+    nativeField.nullable = false
+    let nativeType = fieldTypeNode(nativeField)
+    let referenceType = newTree(nnkBracketExpr, bindSym("FieldRef"), nativeType)
+    fieldSetRecords.add(newTree(nnkIdentDefs,
+      postfix(ident(field.name), "*"), referenceType, newEmptyNode()))
+    let referenceCall = newCall(
+      newTree(nnkBracketExpr, bindSym("fieldRef"), nativeType),
+      newLit(field.name),
+      newLit(field.columnName),
+      newLit(field.nullable))
+    fieldSetConstructor.add(newTree(nnkExprColonExpr,
+      ident(field.name), referenceCall))
+  let fieldSetType = newTree(nnkTypeSection,
+    newTree(nnkTypeDef,
+      postfix(fieldSetName, "*"),
+      newEmptyNode(),
+      newTree(nnkObjectTy, newEmptyNode(), newEmptyNode(), fieldSetRecords)))
+  let fieldsProc = newProc(postfix(ident("nimOrmFields"), "*"),
+    params = [
+      fieldSetName,
+      newIdentDefs(ident("modelType"), typedescModelType)
+    ],
+    body = newStmtList(newAssignment(ident("result"), fieldSetConstructor)))
+
+  result = newStmtList(modelType, fieldSetType, metadataConst, accessor, fieldsProc, encodeProc,
     decodeProc, prepareInsertProc, prepareUpdateProc, primaryKeyProc,
     setPrimaryKeyProc)
