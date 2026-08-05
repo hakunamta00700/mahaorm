@@ -36,6 +36,7 @@ proc decimal*(value: string): Decimal =
   Decimal(text)
 
 proc `$`*(value: Decimal): string {.borrow.}
+proc `==`*(left, right: Decimal): bool {.borrow.}
 
 proc uuid*(value: string): Uuid =
   let text = value.toLowerAscii
@@ -50,6 +51,7 @@ proc uuid*(value: string): Uuid =
   Uuid(text)
 
 proc `$`*(value: Uuid): string {.borrow.}
+proc `==`*(left, right: Uuid): bool {.borrow.}
 
 proc date*(year, month, day: int): Date =
   let parsed = dateTime(year, Month(month), MonthdayRange(day), 0, 0, 0, 0, utc())

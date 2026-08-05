@@ -2,9 +2,11 @@
 
 import std/[json, options, times]
 
-import nimorm/[database, errors, field_defs, metadata, model_macro, types]
+import nimorm/[crud, database, errors, field_defs, metadata, model_macro,
+  serialization, transaction, types]
 import nimorm/schema/[generator, types as schema_types]
 
 export json, options, times
-export database, errors, field_defs, metadata, model_macro, types
+export crud, database, errors, field_defs, metadata, model_macro
+export serialization, transaction, types
 export generator, schema_types

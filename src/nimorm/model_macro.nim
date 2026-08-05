@@ -1,7 +1,9 @@
 import std/[json, macros, options, strutils, tables, times]
 
+import ./backends/base
 import ./field_defs
 import ./metadata
+import ./serialization
 import ./types
 
 type
@@ -415,6 +417,37 @@ proc fieldTypeNode(field: ParsedField): NimNode {.compileTime.} =
   else:
     nativeType
 
+proc defaultValueNode(field: ParsedField): NimNode {.compileTime.} =
+  var value: NimNode
+  case field.kind
+  of fkString, fkText:
+    value = newLit(field.defaultValue)
+  of fkInteger:
+    value = newLit(parseInt(field.defaultValue))
+  of fkBigInteger:
+    value = newLit(parseBiggestInt(field.defaultValue).int64)
+  of fkFloat:
+    value = newLit(parseFloat(field.defaultValue))
+  of fkDecimal:
+    value = newCall(bindSym("decimal"), newLit(field.defaultValue))
+  of fkBoolean:
+    value = ident(field.defaultValue)
+  of fkDate:
+    value = newCall(bindSym("parseDate"), newLit(field.defaultValue))
+  of fkDateTime:
+    value = newCall(bindSym("parse"), newLit(field.defaultValue),
+      newLit("yyyy-MM-dd'T'HH:mm:ss'.'fffzzz"))
+  of fkUuid:
+    value = newCall(bindSym("uuid"), newLit(field.defaultValue))
+  of fkJson:
+    value = newCall(bindSym("parseJson"), newLit(field.defaultValue))
+  else:
+    error("default values are not supported for " & $field.kind, field.sourceNode)
+  if field.nullable:
+    newCall(bindSym("some"), value)
+  else:
+    value
+
 macro model*(name: untyped; body: untyped): untyped =
   if name.kind != nnkIdent:
     error("model: expected a simple model type name", name)
@@ -504,4 +537,130 @@ macro model*(name: untyped; body: untyped): untyped =
     template nimOrmModelMeta*(modelType: typedesc[`modelTypeIdent`]): untyped =
       `metadataIdent`
 
-  result = newStmtList(modelType, metadataConst, accessor)
+  var encodeBody = newStmtList()
+  let includePrimaryKeyArg = ident("includePrimaryKey")
+  let forInsertArg = ident("forInsert")
+  let encodedColumns = newDotExpr(ident("result"), ident("columns"))
+  let encodedValues = newDotExpr(ident("result"), ident("values"))
+  for field in fields:
+    let fieldAccess = newDotExpr(ident("value"), ident(field.name))
+    let isPrimaryKeyLit = newLit(field.primaryKey)
+    let columnName = newLit(field.columnName)
+    let omitDatabaseDefault = newLit(field.dbDefault.len > 0)
+    encodeBody.add quote do:
+      if `includePrimaryKeyArg` or not `isPrimaryKeyLit`:
+        if not `forInsertArg` or not `omitDatabaseDefault` or
+            `fieldAccess` != default(typeof(`fieldAccess`)):
+          `encodedColumns`.add(`columnName`)
+          `encodedValues`.add(toDbValue(`fieldAccess`))
+
+  var decodeBody = newStmtList()
+  let fieldCountLit = newLit(fields.len)
+  let modelNameLit = newLit(modelName)
+  decodeBody.add quote do:
+    if row.len != `fieldCountLit`:
+      raise newException(SerializationError,
+        `modelNameLit` & ": expected " & $`fieldCountLit` &
+        " columns but received " & $row.len)
+  for index, field in fields:
+    let destination = newDotExpr(ident("result"), ident(field.name))
+    let indexLit = newLit(index)
+    decodeBody.add quote do:
+      `destination` = fromDbValue(row[`indexLit`],
+        typeof(`destination`))
+
+  var prepareInsertBody = newStmtList()
+  var prepareUpdateBody = newStmtList()
+  for field in fields:
+    let fieldAccess = newDotExpr(ident("value"), ident(field.name))
+    if field.autoNowAdd or field.autoNow:
+      prepareInsertBody.add quote do:
+        `fieldAccess` = now()
+    elif field.defaultFactory.len > 0:
+      let factoryCall = newCall(ident(field.defaultFactory))
+      prepareInsertBody.add quote do:
+        if `fieldAccess` == default(typeof(`fieldAccess`)):
+          `fieldAccess` = `factoryCall`
+    elif field.hasDefault:
+      let defaultValue = defaultValueNode(field)
+      prepareInsertBody.add quote do:
+        if `fieldAccess` == default(typeof(`fieldAccess`)):
+          `fieldAccess` = `defaultValue`
+    if field.autoNow:
+      prepareUpdateBody.add quote do:
+        `fieldAccess` = now()
+  if prepareInsertBody.len == 0:
+    prepareInsertBody.add(newTree(nnkDiscardStmt, newEmptyNode()))
+  if prepareUpdateBody.len == 0:
+    prepareUpdateBody.add(newTree(nnkDiscardStmt, newEmptyNode()))
+
+  var primaryKeyBody = newStmtList()
+  var setPrimaryKeyBody = newStmtList()
+  for field in fields:
+    if field.primaryKey:
+      let fieldAccess = newDotExpr(ident("value"), ident(field.name))
+      primaryKeyBody.add quote do:
+        return toDbValue(`fieldAccess`)
+      if field.autoIncrement:
+        setPrimaryKeyBody.add quote do:
+          `fieldAccess` = id
+  if primaryKeyBody.len == 0:
+    primaryKeyBody.add quote do:
+      raise newException(SerializationError,
+        `modelNameLit` & ": model has no primary key")
+  if setPrimaryKeyBody.len == 0:
+    setPrimaryKeyBody.add(newTree(nnkDiscardStmt, newEmptyNode()))
+
+  let exportedEncode = postfix(ident("nimOrmEncode"), "*")
+  let exportedDecode = postfix(ident("nimOrmDecode"), "*")
+  let exportedPrepareInsert = postfix(ident("nimOrmPrepareInsert"), "*")
+  let exportedPrepareUpdate = postfix(ident("nimOrmPrepareUpdate"), "*")
+  let exportedPrimaryKey = postfix(ident("nimOrmPrimaryKey"), "*")
+  let exportedSetPrimaryKey = postfix(ident("nimOrmSetGeneratedPrimaryKey"), "*")
+  let varModelType = newTree(nnkVarTy, modelTypeIdent)
+  let typedescModelType = newTree(nnkBracketExpr, bindSym("typedesc"), modelTypeIdent)
+
+  let encodeProc = newProc(exportedEncode,
+    params = [
+      bindSym("EncodedModel"),
+      newIdentDefs(ident("value"), modelTypeIdent),
+      newIdentDefs(ident("includePrimaryKey"), bindSym("bool"), newLit(false)),
+      newIdentDefs(ident("forInsert"), bindSym("bool"), newLit(false))
+    ],
+    body = encodeBody)
+  let decodeProc = newProc(exportedDecode,
+    params = [
+      modelTypeIdent,
+      newIdentDefs(ident("modelType"), typedescModelType),
+      newIdentDefs(ident("row"), bindSym("DbRow"))
+    ],
+    body = decodeBody)
+  let prepareInsertProc = newProc(exportedPrepareInsert,
+    params = [
+      newEmptyNode(),
+      newIdentDefs(ident("value"), varModelType)
+    ],
+    body = prepareInsertBody)
+  let prepareUpdateProc = newProc(exportedPrepareUpdate,
+    params = [
+      newEmptyNode(),
+      newIdentDefs(ident("value"), varModelType)
+    ],
+    body = prepareUpdateBody)
+  let primaryKeyProc = newProc(exportedPrimaryKey,
+    params = [
+      bindSym("DbValue"),
+      newIdentDefs(ident("value"), modelTypeIdent)
+    ],
+    body = primaryKeyBody)
+  let setPrimaryKeyProc = newProc(exportedSetPrimaryKey,
+    params = [
+      newEmptyNode(),
+      newIdentDefs(ident("value"), varModelType),
+      newIdentDefs(ident("id"), bindSym("int64"))
+    ],
+    body = setPrimaryKeyBody)
+
+  result = newStmtList(modelType, metadataConst, accessor, encodeProc,
+    decodeProc, prepareInsertProc, prepareUpdateProc, primaryKeyProc,
+    setPrimaryKeyProc)
