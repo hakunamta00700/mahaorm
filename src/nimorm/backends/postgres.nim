@@ -57,7 +57,7 @@ proc executeParams(db: Database; sqlText: string;
                    params: openArray[DbValue]): PPGresult =
   let handle = db.postgresHandle
   if not db.logger.isNil:
-    db.logger(sqlText, @params)
+    db.logger(sqlText, params.redacted)
 
   var buffers = newSeq[string](params.len)
   var values = newSeq[cstring](params.len)

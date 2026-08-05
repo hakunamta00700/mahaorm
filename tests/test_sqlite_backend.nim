@@ -10,6 +10,13 @@ model Entry:
   meta:
     tableName = "entries"
 
+model Credential:
+  username = stringField(maxLength = 50)
+  password = stringField(maxLength = 100)
+
+  meta:
+    tableName = "credentials"
+
 suite "SQLite backend":
   test "creates model tables and preserves typed parameters":
     let db = openSqlite(":memory:")
@@ -55,7 +62,7 @@ suite "SQLite backend":
       discard db.execute(
         "INSERT INTO \"entries\" (\"key\") VALUES (?)", [dbValue("same")])
 
-  test "logs SQL separately from bound values":
+  test "logs SQL separately from bound values and masks marked values":
     let db = openSqlite(":memory:")
     defer: db.close()
     var loggedSql = ""
@@ -64,6 +71,28 @@ suite "SQLite backend":
       loggedSql = sql
       loggedParams = params
     )
-    discard db.queryRows("SELECT ? AS value", [dbValue("secret")])
+    discard db.queryRows("SELECT ? AS value",
+      [sensitiveDbValue(dbValue("secret"))])
     check loggedSql == "SELECT ? AS value"
-    check loggedParams[0].textValue == "secret"
+    check loggedParams[0].textValue == "***"
+
+  test "automatically masks sensitive model fields without changing storage":
+    let db = openSqlite(":memory:")
+    defer: db.close()
+    db.createTables(Credential)
+    var loggedParams: seq[DbValue]
+    db.enableQueryLogging(proc(sql: string; params: seq[DbValue]) =
+      loggedParams = params
+    )
+
+    var credential = Credential(username: "alice", password: "correct horse")
+    discard db.insert(credential)
+    check loggedParams.len == 2
+    check loggedParams[0].textValue == "alice"
+    check loggedParams[1].textValue == "***"
+
+    let stored = Credential.objects(db)
+      .filter(it.password == "correct horse")
+      .first()
+    check loggedParams[0].textValue == "***"
+    check stored.password == "correct horse"

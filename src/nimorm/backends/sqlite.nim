@@ -54,7 +54,7 @@ proc bindValue(statement: PStmt; index: int32; value: DbValue) =
 proc prepare(db: Database; sqlText: string; params: openArray[DbValue]): PStmt =
   let handle = db.sqliteHandle
   if not db.logger.isNil:
-    db.logger(sqlText, @params)
+    db.logger(sqlText, params.redacted)
   if prepare_v2(handle, sqlText.cstring, sqlText.len.cint, result, nil) != SQLITE_OK:
     raiseSqlite(handle, sqlText)
   try:

@@ -9,6 +9,7 @@ type
     dvBlob
 
   DbValue* = object
+    sensitive*: bool
     case kind*: DbValueKind
     of dvNull:
       discard
@@ -44,6 +45,24 @@ proc dbValue*(value: string): DbValue =
   DbValue(kind: dvText, textValue: value)
 proc dbValue*(value: seq[byte]): DbValue =
   DbValue(kind: dvBlob, blobValue: value)
+
+proc sensitiveDbValue*(value: DbValue): DbValue =
+  result = value
+  result.sensitive = true
+
+proc withSensitivity*(value: DbValue; sensitive: bool): DbValue =
+  result = value
+  result.sensitive = sensitive
+
+proc redacted*(value: DbValue): DbValue =
+  if value.sensitive:
+    dbValue("***")
+  else:
+    value
+
+proc redacted*(values: openArray[DbValue]): seq[DbValue] =
+  for value in values:
+    result.add(value.redacted)
 
 proc enableQueryLogging*(db: Database; logger: QueryLogger) =
   db.logger = logger

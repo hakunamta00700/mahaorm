@@ -62,6 +62,12 @@ proc normalizedIdent(name: string): string {.compileTime.} =
     if character != '_':
       result.add(character.toLowerAscii)
 
+proc isSensitiveFieldName(name, columnName: string): bool {.compileTime.} =
+  let normalized = normalizedIdent(name & columnName)
+  for keyword in ["password", "token", "secret", "apikey"]:
+    if keyword in normalized:
+      return true
+
 proc nodeName(node: NimNode): string {.compileTime.} =
   if node.kind in {nnkIdent, nnkSym}:
     node.strVal
@@ -672,12 +678,14 @@ macro model*(name: untyped; body: untyped): untyped =
     let isPrimaryKeyLit = newLit(field.primaryKey)
     let columnName = newLit(field.columnName)
     let omitDatabaseDefault = newLit(field.dbDefault.len > 0)
+    let sensitive = newLit(isSensitiveFieldName(field.name, field.columnName))
     encodeBody.add quote do:
       if `includePrimaryKeyArg` or not `isPrimaryKeyLit`:
         if not `forInsertArg` or not `omitDatabaseDefault` or
             `fieldAccess` != default(typeof(`fieldAccess`)):
           `encodedColumns`.add(`columnName`)
-          `encodedValues`.add(toDbValue(`fieldAccess`))
+          `encodedValues`.add(withSensitivity(toDbValue(`fieldAccess`),
+            `sensitive`))
 
   var decodeBody = newStmtList()
   let fieldCountLit = newLit(fields.len)
@@ -800,7 +808,8 @@ macro model*(name: untyped; body: untyped): untyped =
       newTree(nnkBracketExpr, bindSym("fieldRef"), nativeType),
       newLit(field.name),
       newLit(field.columnName),
-      newLit(field.nullable))
+      newLit(field.nullable),
+      newLit(isSensitiveFieldName(field.name, field.columnName)))
     fieldSetConstructor.add(newTree(nnkExprColonExpr,
       ident(field.name), referenceCall))
   let fieldSetType = newTree(nnkTypeSection,

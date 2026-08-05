@@ -45,7 +45,8 @@ proc compileExpression*(expression: SqlExpression; backend: BackendKind;
       of loContains: "%" & escapeLike(raw) & "%"
       of loStartsWith: escapeLike(raw) & "%"
       of loEndsWith: "%" & escapeLike(raw)
-    params.add(dbValue(pattern))
+    params.add(withSensitivity(dbValue(pattern),
+      expression.values[0].sensitive))
     quoteIdentifier(expression.columnName, backend) & " LIKE " &
       marker(backend, params.len) & " ESCAPE '\\'"
   of ekIn:
