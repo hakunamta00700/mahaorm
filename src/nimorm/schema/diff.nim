@@ -46,14 +46,16 @@ proc diffGroups(result: var seq[MigrationOperation];
         kind: dropKind,
         modelName: model.modelName,
         tableName: model.tableName,
-        fields: fields))
+        fields: fields,
+        model: model))
   for key, fields in newGroups:
     if not oldGroups.hasKey(key):
       result.add(MigrationOperation(
         kind: addKind,
         modelName: model.modelName,
         tableName: model.tableName,
-        fields: fields))
+        fields: fields,
+        model: model))
 
 proc diffSchemas*(previous, current: SchemaSnapshot;
                   migrationName: string;

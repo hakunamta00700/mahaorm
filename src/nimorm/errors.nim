@@ -10,3 +10,4 @@ type
   MultipleRecordsFound* = object of OrmError
   SerializationError* = object of OrmError
   TransactionError* = object of OrmError
+  MigrationError* = object of OrmError

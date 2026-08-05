@@ -139,7 +139,7 @@ proc readStringGroups(node: JsonNode): seq[seq[string]] =
       values.add(value.getStr)
     result.add(values)
 
-proc fieldSnapshotFromJson(node: JsonNode): FieldSnapshot =
+proc fieldSnapshotFromJson*(node: JsonNode): FieldSnapshot =
   FieldSnapshot(
     name: node["name"].getStr,
     storageName: node["storageName"].getStr,
@@ -161,21 +161,56 @@ proc fieldSnapshotFromJson(node: JsonNode): FieldSnapshot =
     relatedName: node["relatedName"].getStr,
     onDelete: parseEnum[OnDeleteAction](node["onDelete"].getStr))
 
+proc modelSnapshotFromJson*(modelNode: JsonNode): ModelSnapshot =
+  result = ModelSnapshot(
+    modelName: modelNode["modelName"].getStr,
+    tableName: modelNode["tableName"].getStr,
+    uniqueTogether: readStringGroups(modelNode["uniqueTogether"]),
+    indexes: readStringGroups(modelNode["indexes"]),
+    managed: modelNode["managed"].getBool)
+  for fieldNode in modelNode["fields"]:
+    result.fields.add(fieldSnapshotFromJson(fieldNode))
+
+proc toFieldMeta*(field: FieldSnapshot): FieldMeta =
+  FieldMeta(
+    name: field.name,
+    storageName: field.storageName,
+    columnName: field.columnName,
+    kind: field.kind,
+    nullable: field.nullable,
+    primaryKey: field.primaryKey,
+    unique: field.unique,
+    indexed: field.indexed,
+    maxLength: field.maxLength,
+    precision: field.precision,
+    scale: field.scale,
+    autoIncrement: field.autoIncrement,
+    hasDefault: field.hasDefault,
+    defaultValue: field.defaultValue,
+    dbDefault: field.dbDefault,
+    relationTarget: field.relationTarget,
+    relationTable: field.relationTable,
+    relatedName: field.relatedName,
+    onDelete: field.onDelete,
+    editable: true)
+
+proc toModelMeta*(model: ModelSnapshot): ModelMeta =
+  result = ModelMeta(
+    modelName: model.modelName,
+    tableName: model.tableName,
+    uniqueTogether: model.uniqueTogether,
+    indexes: model.indexes,
+    managed: model.managed)
+  for field in model.fields:
+    result.fields.add(field.toFieldMeta)
+
 proc schemaSnapshotFromJson*(node: JsonNode): SchemaSnapshot =
   result.formatVersion = node["formatVersion"].getInt
   if result.formatVersion != 1:
     raise newException(ValueError,
       "unsupported schema snapshot format version: " & $result.formatVersion)
   for modelNode in node["models"]:
-    var model = ModelSnapshot(
-      modelName: modelNode["modelName"].getStr,
-      tableName: modelNode["tableName"].getStr,
-      uniqueTogether: readStringGroups(modelNode["uniqueTogether"]),
-      indexes: readStringGroups(modelNode["indexes"]),
-      managed: modelNode["managed"].getBool)
-    for fieldNode in modelNode["fields"]:
-      model.fields.add(fieldSnapshotFromJson(fieldNode))
-    result.models.add(model)
+    result.models.add(modelSnapshotFromJson(modelNode))
 
 proc saveSnapshot*(snapshot: SchemaSnapshot; path: string) =
   let parent = path.parentDir
