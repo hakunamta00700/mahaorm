@@ -19,6 +19,15 @@ type
     verboseName*: string
     helpText*: string
     editable*: bool
+    precision*: int
+    scale*: int
+    autoIncrement*: bool
+    autoNow*: bool
+    autoNowAdd*: bool
+    hasDefault*: bool
+    defaultValue*: string
+    dbDefault*: string
+    defaultFactory*: string
 
   ModelMeta* = object
     modelName*: string

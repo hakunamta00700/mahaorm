@@ -1,7 +1,8 @@
-import std/[macros, options, strutils, tables]
+import std/[json, macros, options, strutils, tables, times]
 
 import ./field_defs
 import ./metadata
+import ./types
 
 type
   ParsedField = object
@@ -18,6 +19,15 @@ type
     verboseName: string
     helpText: string
     editable: bool
+    precision: int
+    scale: int
+    autoIncrement: bool
+    autoNow: bool
+    autoNowAdd: bool
+    hasDefault: bool
+    defaultValue: string
+    dbDefault: string
+    defaultFactory: string
     sourceNode: NimNode
 
   ParsedModelMeta = object
@@ -57,6 +67,29 @@ proc expectInt(node: NimNode; context: string): int {.compileTime.} =
     error(context & " must be an integer literal", node)
   int(node.intVal)
 
+proc expectDefault(node: NimNode; context: string): string {.compileTime.} =
+  case node.kind
+  of nnkStrLit, nnkRStrLit, nnkTripleStrLit:
+    node.strVal
+  of nnkCharLit:
+    $chr(node.intVal)
+  of nnkIntLit..nnkUInt64Lit:
+    $node.intVal
+  of nnkFloatLit..nnkFloat64Lit:
+    $node.floatVal
+  of nnkIdent, nnkSym:
+    if node.strVal in ["true", "false"]:
+      node.strVal
+    else:
+      error(context & " must be a scalar literal", node)
+  else:
+    error(context & " must be a scalar literal", node)
+
+proc expectProcName(node: NimNode; context: string): string {.compileTime.} =
+  if node.kind notin {nnkIdent, nnkSym}:
+    error(context & " must name a proc", node)
+  node.strVal
+
 proc expectStringSeq(node: NimNode; context: string): seq[string] {.compileTime.} =
   if node.kind != nnkPrefix or node.len != 2 or nodeName(node[0]) != "@" or
       node[1].kind != nnkBracket:
@@ -89,9 +122,31 @@ proc parseField(modelName, fieldName: string; rhs: NimNode): ParsedField {.compi
     result.maxLength = -1
   of "textField":
     result.kind = fkText
+  of "integerField":
+    result.kind = fkInteger
+  of "bigIntegerField":
+    result.kind = fkBigInteger
+  of "floatField":
+    result.kind = fkFloat
+  of "decimalField":
+    result.kind = fkDecimal
+    result.precision = -1
+    result.scale = -1
+  of "booleanField":
+    result.kind = fkBoolean
+  of "dateField":
+    result.kind = fkDate
+  of "dateTimeField":
+    result.kind = fkDateTime
+  of "uuidField":
+    result.kind = fkUuid
+  of "jsonField":
+    result.kind = fkJson
+  of "binaryField":
+    result.kind = fkBinary
   else:
     error(context & ": unsupported field type '" & fieldType &
-      "' in Phase 1 (supported: stringField, textField)", rhs[0])
+      "'", rhs[0])
 
   result.name = fieldName
   result.columnName = fieldName
@@ -123,6 +178,19 @@ proc parseField(modelName, fieldName: string; rhs: NimNode): ParsedField {.compi
     of "verboseName": result.verboseName = expectString(argument[1], context & ".verboseName")
     of "helpText": result.helpText = expectString(argument[1], context & ".helpText")
     of "editable": result.editable = expectBool(argument[1], context & ".editable")
+    of "default":
+      result.hasDefault = true
+      result.defaultValue = expectDefault(argument[1], context & ".default")
+    of "dbDefault":
+      result.dbDefault = expectString(argument[1], context & ".dbDefault")
+    of "defaultFactory":
+      result.defaultFactory = expectProcName(argument[1], context & ".defaultFactory")
+    of "autoIncrement":
+      result.autoIncrement = expectBool(argument[1], context & ".autoIncrement")
+    of "autoNow":
+      result.autoNow = expectBool(argument[1], context & ".autoNow")
+    of "autoNowAdd":
+      result.autoNowAdd = expectBool(argument[1], context & ".autoNowAdd")
     of "maxLength":
       if result.kind != fkString:
         error(context & ": textField does not support option 'maxLength'", argument)
@@ -135,6 +203,14 @@ proc parseField(modelName, fieldName: string; rhs: NimNode): ParsedField {.compi
       if result.kind != fkString:
         error(context & ": textField does not support option 'trim'", argument)
       result.trim = expectBool(argument[1], context & ".trim")
+    of "precision":
+      if result.kind != fkDecimal:
+        error(context & ": " & fieldType & " does not support option 'precision'", argument)
+      result.precision = expectInt(argument[1], context & ".precision")
+    of "scale":
+      if result.kind != fkDecimal:
+        error(context & ": " & fieldType & " does not support option 'scale'", argument)
+      result.scale = expectInt(argument[1], context & ".scale")
     else:
       error(context & ": unsupported option '" & optionName & "' for " & fieldType, argument[0])
 
@@ -145,8 +221,28 @@ proc parseField(modelName, fieldName: string; rhs: NimNode): ParsedField {.compi
       error(context & ": stringField minLength must not be negative", rhs)
     if result.minLength > result.maxLength:
       error(context & ": stringField minLength must not exceed maxLength", rhs)
+  if result.kind == fkDecimal:
+    if result.precision < 1:
+      error(context & ": decimalField precision must be at least 1", rhs)
+    if result.scale < 0:
+      error(context & ": decimalField scale must not be negative", rhs)
+    if result.scale > result.precision:
+      error(context & ": decimalField scale must not exceed precision", rhs)
   if result.primaryKey and result.nullable:
     error(context & ": a primary key cannot be nullable", rhs)
+  if result.autoIncrement and result.kind notin {fkInteger, fkBigInteger}:
+    error(context & ": autoIncrement is only valid for integer fields", rhs)
+  if result.autoIncrement and not result.primaryKey:
+    error(context & ": autoIncrement requires primaryKey = true", rhs)
+  if (result.autoNow or result.autoNowAdd) and result.kind != fkDateTime:
+    error(context & ": autoNow and autoNowAdd are only valid for dateTimeField", rhs)
+  if result.autoNow and result.autoNowAdd:
+    error(context & ": autoNow and autoNowAdd cannot both be true", rhs)
+  if result.hasDefault and result.defaultFactory.len > 0:
+    error(context & ": default and defaultFactory cannot be used together", rhs)
+  if (result.autoNow or result.autoNowAdd) and
+      (result.hasDefault or result.defaultFactory.len > 0):
+    error(context & ": automatic timestamps cannot be combined with a default", rhs)
 
 proc parseMeta(modelName: string; metaBlock: NimNode;
                meta: var ParsedModelMeta) {.compileTime.} =
@@ -255,7 +351,16 @@ proc fieldMetaNode(field: ParsedField): NimNode {.compileTime.} =
     newTree(nnkExprColonExpr, ident("trim"), newLit(field.trim)),
     newTree(nnkExprColonExpr, ident("verboseName"), newLit(field.verboseName)),
     newTree(nnkExprColonExpr, ident("helpText"), newLit(field.helpText)),
-    newTree(nnkExprColonExpr, ident("editable"), newLit(field.editable)))
+    newTree(nnkExprColonExpr, ident("editable"), newLit(field.editable)),
+    newTree(nnkExprColonExpr, ident("precision"), newLit(field.precision)),
+    newTree(nnkExprColonExpr, ident("scale"), newLit(field.scale)),
+    newTree(nnkExprColonExpr, ident("autoIncrement"), newLit(field.autoIncrement)),
+    newTree(nnkExprColonExpr, ident("autoNow"), newLit(field.autoNow)),
+    newTree(nnkExprColonExpr, ident("autoNowAdd"), newLit(field.autoNowAdd)),
+    newTree(nnkExprColonExpr, ident("hasDefault"), newLit(field.hasDefault)),
+    newTree(nnkExprColonExpr, ident("defaultValue"), newLit(field.defaultValue)),
+    newTree(nnkExprColonExpr, ident("dbDefault"), newLit(field.dbDefault)),
+    newTree(nnkExprColonExpr, ident("defaultFactory"), newLit(field.defaultFactory)))
 
 proc fieldsNode(fields: seq[ParsedField]): NimNode {.compileTime.} =
   var bracket = newNimNode(nnkBracket)
@@ -283,10 +388,28 @@ proc fieldTypeNode(field: ParsedField): NimNode {.compileTime.} =
   case field.kind
   of fkString, fkText:
     nativeType = bindSym("string")
+  of fkInteger:
+    nativeType = bindSym("int")
   of fkBigInteger:
     nativeType = bindSym("int64")
+  of fkFloat:
+    nativeType = bindSym("float64")
+  of fkDecimal:
+    nativeType = bindSym("Decimal")
+  of fkBoolean:
+    nativeType = bindSym("bool")
+  of fkDate:
+    nativeType = bindSym("Date")
+  of fkDateTime:
+    nativeType = bindSym("DateTime")
+  of fkUuid:
+    nativeType = bindSym("Uuid")
+  of fkJson:
+    nativeType = bindSym("JsonNode")
+  of fkBinary:
+    nativeType = newTree(nnkBracketExpr, bindSym("seq"), bindSym("byte"))
   else:
-    error("internal error: no Phase 1 native type for " & $field.kind, field.sourceNode)
+    error("internal error: no native type for " & $field.kind, field.sourceNode)
   if field.nullable:
     newTree(nnkBracketExpr, bindSym("Option"), nativeType)
   else:
@@ -343,6 +466,7 @@ macro model*(name: untyped; body: untyped): untyped =
       kind: fkBigInteger,
       primaryKey: true,
       unique: true,
+      autoIncrement: true,
       editable: false,
       sourceNode: body), 0)
 
