@@ -7,6 +7,7 @@ import ./serialization
 import ./types
 import ./query/expressions
 import ./relations
+import ./validation
 
 type
   ParsedField = object
@@ -37,6 +38,12 @@ type
     relationTargetNode: NimNode
     relatedName: string
     onDelete: OnDeleteAction
+    pattern: string
+    hasMinValue: bool
+    minValue: float64
+    hasMaxValue: bool
+    maxValue: float64
+    validators: seq[NimNode]
     sourceNode: NimNode
 
   ParsedModelMeta = object
@@ -98,6 +105,24 @@ proc expectProcName(node: NimNode; context: string): string {.compileTime.} =
   if node.kind notin {nnkIdent, nnkSym}:
     error(context & " must name a proc", node)
   node.strVal
+
+proc expectFloat(node: NimNode; context: string): float64 {.compileTime.} =
+  case node.kind
+  of nnkIntLit..nnkUInt64Lit:
+    node.intVal.float64
+  of nnkFloatLit..nnkFloat64Lit:
+    node.floatVal
+  else:
+    error(context & " must be a numeric literal", node)
+
+proc expectValidators(node: NimNode; context: string): seq[NimNode] {.compileTime.} =
+  if node.kind != nnkPrefix or node.len != 2 or nodeName(node[0]) != "@" or
+      node[1].kind != nnkBracket:
+    error(context & " must be a proc sequence such as @[validateName]", node)
+  for validator in node[1]:
+    if validator.kind notin {nnkIdent, nnkSym}:
+      error(context & " entries must name validator procs", validator)
+    result.add(validator)
 
 proc expectStringSeq(node: NimNode; context: string): seq[string] {.compileTime.} =
   if node.kind != nnkPrefix or node.len != 2 or nodeName(node[0]) != "@" or
@@ -242,6 +267,22 @@ proc parseField(modelName, fieldName: string; rhs: NimNode): ParsedField {.compi
       if result.kind notin {fkForeignKey, fkOneToOne}:
         error(context & ": relatedName is only valid for relation fields", argument)
       result.relatedName = expectString(argument[1], context & ".relatedName")
+    of "pattern":
+      if result.kind notin {fkString, fkText}:
+        error(context & ": pattern is only valid for string fields", argument)
+      result.pattern = expectString(argument[1], context & ".pattern")
+    of "minValue":
+      if result.kind notin {fkInteger, fkBigInteger, fkFloat, fkDecimal}:
+        error(context & ": minValue is only valid for numeric fields", argument)
+      result.hasMinValue = true
+      result.minValue = expectFloat(argument[1], context & ".minValue")
+    of "maxValue":
+      if result.kind notin {fkInteger, fkBigInteger, fkFloat, fkDecimal}:
+        error(context & ": maxValue is only valid for numeric fields", argument)
+      result.hasMaxValue = true
+      result.maxValue = expectFloat(argument[1], context & ".maxValue")
+    of "validators":
+      result.validators = expectValidators(argument[1], context & ".validators")
     of "maxLength":
       if result.kind != fkString:
         error(context & ": textField does not support option 'maxLength'", argument)
@@ -301,6 +342,9 @@ proc parseField(modelName, fieldName: string; rhs: NimNode): ParsedField {.compi
       error(context & ": onDelete = SetNull requires nullable = true", rhs)
     if result.onDelete == SetDefault and not result.hasDefault:
       error(context & ": onDelete = SetDefault requires a default", rhs)
+  if result.hasMinValue and result.hasMaxValue and
+      result.minValue > result.maxValue:
+    error(context & ": minValue must not exceed maxValue", rhs)
 
 proc parseMeta(modelName: string; metaBlock: NimNode;
                meta: var ParsedModelMeta) {.compileTime.} =
@@ -402,6 +446,9 @@ proc fieldMetaNode(field: ParsedField): NimNode {.compileTime.} =
         ident("tableName"))
     else:
       newLit("")
+  var validatorNames: seq[string]
+  for validator in field.validators:
+    validatorNames.add(nodeName(validator))
   newTree(nnkObjConstr,
     bindSym("FieldMeta"),
     newTree(nnkExprColonExpr, ident("name"), newLit(field.name)),
@@ -430,7 +477,14 @@ proc fieldMetaNode(field: ParsedField): NimNode {.compileTime.} =
     newTree(nnkExprColonExpr, ident("relationTarget"), newLit(field.relationTarget)),
     newTree(nnkExprColonExpr, ident("relationTable"), relationTable),
     newTree(nnkExprColonExpr, ident("relatedName"), newLit(field.relatedName)),
-    newTree(nnkExprColonExpr, ident("onDelete"), ident($field.onDelete)))
+    newTree(nnkExprColonExpr, ident("onDelete"), ident($field.onDelete)),
+    newTree(nnkExprColonExpr, ident("pattern"), newLit(field.pattern)),
+    newTree(nnkExprColonExpr, ident("hasMinValue"), newLit(field.hasMinValue)),
+    newTree(nnkExprColonExpr, ident("minValue"), newLit(field.minValue)),
+    newTree(nnkExprColonExpr, ident("hasMaxValue"), newLit(field.hasMaxValue)),
+    newTree(nnkExprColonExpr, ident("maxValue"), newLit(field.maxValue)),
+    newTree(nnkExprColonExpr, ident("validatorNames"),
+      stringSeqNode(validatorNames)))
 
 proc fieldsNode(fields: seq[ParsedField]): NimNode {.compileTime.} =
   var bracket = newNimNode(nnkBracket)
@@ -810,7 +864,57 @@ macro model*(name: untyped; body: untyped): untyped =
     ],
     body = newStmtList(newAssignment(ident("result"), relationSetConstructor)))
 
+  var validationBody = newStmtList()
+  let validationIssues = ident("result")
+  for field in fields:
+    let fieldAccess = newDotExpr(ident("value"), ident(field.storageName))
+    let fieldNameLit = newLit(field.name)
+    if field.kind in {fkString, fkText}:
+      let validationCall = newCall(bindSym("validateStringValue"),
+        fieldNameLit,
+        fieldAccess,
+        newLit(field.minLength),
+        newLit(field.maxLength),
+        newLit(field.pattern))
+      validationBody.add(newCall(bindSym("add"),
+        validationIssues, validationCall))
+    elif field.kind in {fkInteger, fkBigInteger, fkFloat}:
+      let validationCall = newCall(bindSym("validateNumericValue"),
+        fieldNameLit,
+        fieldAccess,
+        newLit(field.hasMinValue),
+        newLit(field.minValue),
+        newLit(field.hasMaxValue),
+        newLit(field.maxValue))
+      validationBody.add(newCall(bindSym("add"),
+        validationIssues, validationCall))
+    elif field.kind == fkDecimal:
+      let validationCall = newCall(bindSym("validateDecimalValue"),
+        fieldNameLit,
+        fieldAccess,
+        newLit(field.hasMinValue),
+        newLit(field.minValue),
+        newLit(field.hasMaxValue),
+        newLit(field.maxValue))
+      validationBody.add(newCall(bindSym("add"),
+        validationIssues, validationCall))
+    for validator in field.validators:
+      validationBody.add(newCall(bindSym("addCustomValidation"),
+        validationIssues,
+        fieldNameLit,
+        newCall(validator, fieldAccess)))
+  if validationBody.len == 0:
+    validationBody.add(newTree(nnkDiscardStmt, newEmptyNode()))
+  let validationResultType = newTree(nnkBracketExpr,
+    bindSym("seq"), bindSym("ValidationIssue"))
+  let validateProc = newProc(postfix(ident("nimOrmValidate"), "*"),
+    params = [
+      validationResultType,
+      newIdentDefs(ident("value"), modelTypeIdent)
+    ],
+    body = validationBody)
+
   result = newStmtList(modelType, fieldSetType, relationSetType, metadataConst,
     accessor, fieldsProc, relationGetterProcs, relationsProc, encodeProc,
     decodeProc, prepareInsertProc, prepareUpdateProc, primaryKeyProc,
-    setPrimaryKeyProc)
+    setPrimaryKeyProc, validateProc)

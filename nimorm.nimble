@@ -21,6 +21,7 @@ task test, "Run the Phase 1 test suite":
   exec "nim c -r --hints:off --path:src tests/test_schema_diff.nim"
   exec "nim c -r --hints:off --path:src tests/test_migrations.nim"
   exec "nim c -r --hints:off --path:src tests/test_cli.nim"
+  exec "nim c -r --hints:off --path:src tests/test_validation.nim"
   exec "nim c -r --hints:off --path:src src/nimorm/cli/main.nim -- --help"
 
 task example, "Compile and run the basic model example":

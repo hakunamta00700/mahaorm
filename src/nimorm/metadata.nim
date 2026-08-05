@@ -33,6 +33,12 @@ type
     relationTable*: string
     relatedName*: string
     onDelete*: OnDeleteAction
+    pattern*: string
+    hasMinValue*: bool
+    minValue*: float64
+    hasMaxValue*: bool
+    maxValue*: float64
+    validatorNames*: seq[string]
 
   ModelMeta* = object
     modelName*: string
