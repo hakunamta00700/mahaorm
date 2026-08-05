@@ -17,6 +17,7 @@ task test, "Run the Phase 1 test suite":
   exec "nim c -r --hints:off --path:src tests/test_query_builder.nim"
   exec "nim c -r --hints:off --path:src tests/test_relations.nim"
   exec "nim c -r --hints:off --path:src tests/test_postgres_backend.nim"
+  exec "nim c -r --hints:off --path:src tests/test_schema_diff.nim"
 
 task example, "Compile and run the basic model example":
   exec "nim c -r --hints:off --path:src examples/basic_model.nim"
