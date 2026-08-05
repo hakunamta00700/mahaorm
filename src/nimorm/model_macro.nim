@@ -6,6 +6,7 @@ import ./metadata
 import ./serialization
 import ./types
 import ./query/expressions
+import ./relations
 
 type
   ParsedField = object
@@ -31,6 +32,11 @@ type
     defaultValue: string
     dbDefault: string
     defaultFactory: string
+    storageName: string
+    relationTarget: string
+    relationTargetNode: NimNode
+    relatedName: string
+    onDelete: OnDeleteAction
     sourceNode: NimNode
 
   ParsedModelMeta = object
@@ -113,12 +119,39 @@ proc defaultTableName(modelName: string): string {.compileTime.} =
   result = modelName
   result[0] = result[0].toLowerAscii
 
+proc snakeCase(name: string): string {.compileTime.} =
+  for index, character in name:
+    if character.isUpperAscii:
+      if index > 0:
+        result.add('_')
+      result.add(character.toLowerAscii)
+    else:
+      result.add(character)
+
+proc expectOnDelete(node: NimNode; context: string): OnDeleteAction {.compileTime.} =
+  if node.kind notin {nnkIdent, nnkSym}:
+    error(context & " must be an OnDeleteAction value", node)
+  case node.strVal
+  of "Cascade": Cascade
+  of "Restrict": Restrict
+  of "SetNull": SetNull
+  of "SetDefault": SetDefault
+  of "NoAction": NoAction
+  else:
+    error(context & ": unsupported onDelete action '" & node.strVal & "'", node)
+
 proc parseField(modelName, fieldName: string; rhs: NimNode): ParsedField {.compileTime.} =
   let context = modelName & "." & fieldName
   if rhs.kind notin {nnkCall, nnkCommand} or rhs.len == 0:
     error(context & ": expected a field declaration such as stringField(maxLength = 200)", rhs)
 
   let fieldType = nodeName(rhs[0])
+  result.name = fieldName
+  result.storageName = fieldName
+  result.columnName = fieldName
+  result.editable = true
+  result.sourceNode = rhs
+  var firstOption = 1
   case fieldType
   of "stringField":
     result.kind = fkString
@@ -147,17 +180,24 @@ proc parseField(modelName, fieldName: string; rhs: NimNode): ParsedField {.compi
     result.kind = fkJson
   of "binaryField":
     result.kind = fkBinary
+  of "foreignKey", "oneToOneField":
+    if rhs.len < 2 or rhs[1].kind notin {nnkIdent, nnkSym}:
+      error(context & ": " & fieldType & " requires a target model type", rhs)
+    result.kind =
+      if fieldType == "foreignKey": fkForeignKey
+      else: fkOneToOne
+    result.relationTarget = nodeName(rhs[1])
+    result.relationTargetNode = rhs[1]
+    result.storageName = fieldName & "Id"
+    result.columnName = snakeCase(fieldName) & "_id"
+    result.unique = result.kind == fkOneToOne
+    firstOption = 2
   else:
     error(context & ": unsupported field type '" & fieldType &
       "'", rhs[0])
 
-  result.name = fieldName
-  result.columnName = fieldName
-  result.editable = true
-  result.sourceNode = rhs
-
   var seen = initTable[string, bool]()
-  for index in 1 ..< rhs.len:
+  for index in firstOption ..< rhs.len:
     let argument = rhs[index]
     if argument.kind != nnkExprEqExpr or argument.len != 2:
       error(context & ": field options must use name = value", argument)
@@ -194,6 +234,14 @@ proc parseField(modelName, fieldName: string; rhs: NimNode): ParsedField {.compi
       result.autoNow = expectBool(argument[1], context & ".autoNow")
     of "autoNowAdd":
       result.autoNowAdd = expectBool(argument[1], context & ".autoNowAdd")
+    of "onDelete":
+      if result.kind notin {fkForeignKey, fkOneToOne}:
+        error(context & ": onDelete is only valid for relation fields", argument)
+      result.onDelete = expectOnDelete(argument[1], context & ".onDelete")
+    of "relatedName":
+      if result.kind notin {fkForeignKey, fkOneToOne}:
+        error(context & ": relatedName is only valid for relation fields", argument)
+      result.relatedName = expectString(argument[1], context & ".relatedName")
     of "maxLength":
       if result.kind != fkString:
         error(context & ": textField does not support option 'maxLength'", argument)
@@ -246,6 +294,13 @@ proc parseField(modelName, fieldName: string; rhs: NimNode): ParsedField {.compi
   if (result.autoNow or result.autoNowAdd) and
       (result.hasDefault or result.defaultFactory.len > 0):
     error(context & ": automatic timestamps cannot be combined with a default", rhs)
+  if result.kind in {fkForeignKey, fkOneToOne}:
+    if not seen.hasKey(normalizedIdent("onDelete")):
+      error(context & ": relation fields require onDelete", rhs)
+    if result.onDelete == SetNull and not result.nullable:
+      error(context & ": onDelete = SetNull requires nullable = true", rhs)
+    if result.onDelete == SetDefault and not result.hasDefault:
+      error(context & ": onDelete = SetDefault requires a default", rhs)
 
 proc parseMeta(modelName: string; metaBlock: NimNode;
                meta: var ParsedModelMeta) {.compileTime.} =
@@ -340,6 +395,13 @@ proc nestedStringSeqNode(values: seq[seq[string]]): NimNode {.compileTime.} =
   newTree(nnkPrefix, ident("@"), bracket)
 
 proc fieldMetaNode(field: ParsedField): NimNode {.compileTime.} =
+  let relationTable =
+    if field.kind in {fkForeignKey, fkOneToOne}:
+      newDotExpr(
+        newCall(bindSym("getModelMeta"), field.relationTargetNode),
+        ident("tableName"))
+    else:
+      newLit("")
   newTree(nnkObjConstr,
     bindSym("FieldMeta"),
     newTree(nnkExprColonExpr, ident("name"), newLit(field.name)),
@@ -363,7 +425,12 @@ proc fieldMetaNode(field: ParsedField): NimNode {.compileTime.} =
     newTree(nnkExprColonExpr, ident("hasDefault"), newLit(field.hasDefault)),
     newTree(nnkExprColonExpr, ident("defaultValue"), newLit(field.defaultValue)),
     newTree(nnkExprColonExpr, ident("dbDefault"), newLit(field.dbDefault)),
-    newTree(nnkExprColonExpr, ident("defaultFactory"), newLit(field.defaultFactory)))
+    newTree(nnkExprColonExpr, ident("defaultFactory"), newLit(field.defaultFactory)),
+    newTree(nnkExprColonExpr, ident("storageName"), newLit(field.storageName)),
+    newTree(nnkExprColonExpr, ident("relationTarget"), newLit(field.relationTarget)),
+    newTree(nnkExprColonExpr, ident("relationTable"), relationTable),
+    newTree(nnkExprColonExpr, ident("relatedName"), newLit(field.relatedName)),
+    newTree(nnkExprColonExpr, ident("onDelete"), ident($field.onDelete)))
 
 proc fieldsNode(fields: seq[ParsedField]): NimNode {.compileTime.} =
   var bracket = newNimNode(nnkBracket)
@@ -411,8 +478,8 @@ proc fieldTypeNode(field: ParsedField): NimNode {.compileTime.} =
     nativeType = bindSym("JsonNode")
   of fkBinary:
     nativeType = newTree(nnkBracketExpr, bindSym("seq"), bindSym("byte"))
-  else:
-    error("internal error: no native type for " & $field.kind, field.sourceNode)
+  of fkForeignKey, fkOneToOne:
+    nativeType = bindSym("int64")
   if field.nullable:
     newTree(nnkBracketExpr, bindSym("Option"), nativeType)
   else:
@@ -442,6 +509,8 @@ proc defaultValueNode(field: ParsedField): NimNode {.compileTime.} =
     value = newCall(bindSym("uuid"), newLit(field.defaultValue))
   of fkJson:
     value = newCall(bindSym("parseJson"), newLit(field.defaultValue))
+  of fkForeignKey, fkOneToOne:
+    value = newLit(parseBiggestInt(field.defaultValue).int64)
   else:
     error("default values are not supported for " & $field.kind, field.sourceNode)
   if field.nullable:
@@ -496,6 +565,7 @@ macro model*(name: untyped; body: untyped): untyped =
         "mark it primaryKey = true or set meta.autoPrimaryKey = false", body)
     fields.insert(ParsedField(
       name: "id",
+      storageName: "id",
       columnName: "id",
       kind: fkBigInteger,
       primaryKey: true,
@@ -517,7 +587,7 @@ macro model*(name: untyped; body: untyped): untyped =
   var recordList = newNimNode(nnkRecList)
   for field in fields:
     recordList.add(newTree(nnkIdentDefs,
-      postfix(ident(field.name), "*"),
+      postfix(ident(field.storageName), "*"),
       fieldTypeNode(field),
       newEmptyNode()))
 
@@ -544,7 +614,7 @@ macro model*(name: untyped; body: untyped): untyped =
   let encodedColumns = newDotExpr(ident("result"), ident("columns"))
   let encodedValues = newDotExpr(ident("result"), ident("values"))
   for field in fields:
-    let fieldAccess = newDotExpr(ident("value"), ident(field.name))
+    let fieldAccess = newDotExpr(ident("value"), ident(field.storageName))
     let isPrimaryKeyLit = newLit(field.primaryKey)
     let columnName = newLit(field.columnName)
     let omitDatabaseDefault = newLit(field.dbDefault.len > 0)
@@ -564,7 +634,7 @@ macro model*(name: untyped; body: untyped): untyped =
         `modelNameLit` & ": expected " & $`fieldCountLit` &
         " columns but received " & $row.len)
   for index, field in fields:
-    let destination = newDotExpr(ident("result"), ident(field.name))
+    let destination = newDotExpr(ident("result"), ident(field.storageName))
     let indexLit = newLit(index)
     decodeBody.add quote do:
       `destination` = fromDbValue(row[`indexLit`],
@@ -573,7 +643,7 @@ macro model*(name: untyped; body: untyped): untyped =
   var prepareInsertBody = newStmtList()
   var prepareUpdateBody = newStmtList()
   for field in fields:
-    let fieldAccess = newDotExpr(ident("value"), ident(field.name))
+    let fieldAccess = newDotExpr(ident("value"), ident(field.storageName))
     if field.autoNowAdd or field.autoNow:
       prepareInsertBody.add quote do:
         `fieldAccess` = now()
@@ -599,7 +669,7 @@ macro model*(name: untyped; body: untyped): untyped =
   var setPrimaryKeyBody = newStmtList()
   for field in fields:
     if field.primaryKey:
-      let fieldAccess = newDotExpr(ident("value"), ident(field.name))
+      let fieldAccess = newDotExpr(ident("value"), ident(field.storageName))
       primaryKeyBody.add quote do:
         return toDbValue(`fieldAccess`)
       if field.autoIncrement:
@@ -691,6 +761,56 @@ macro model*(name: untyped; body: untyped): untyped =
     ],
     body = newStmtList(newAssignment(ident("result"), fieldSetConstructor)))
 
-  result = newStmtList(modelType, fieldSetType, metadataConst, accessor, fieldsProc, encodeProc,
+  let relationSetName = ident(modelName & "Relations")
+  var relationSetRecords = newNimNode(nnkRecList)
+  var relationSetConstructor = newTree(nnkObjConstr, relationSetName)
+  var relationGetterProcs = newStmtList()
+  for field in fields:
+    if field.kind notin {fkForeignKey, fkOneToOne}:
+      continue
+    let targetType = field.relationTargetNode
+    let relationType = newTree(nnkBracketExpr, bindSym("RelationRef"),
+      modelTypeIdent, targetType)
+    relationSetRecords.add(newTree(nnkIdentDefs,
+      postfix(ident(field.name), "*"), relationType, newEmptyNode()))
+
+    let getterName = ident("nimOrm" & modelName & field.name.capitalizeAscii &
+      "RelationValue")
+    let relationFieldAccess = newDotExpr(ident("source"),
+      ident(field.storageName))
+    let getterProc = newProc(getterName,
+      params = [
+        bindSym("DbValue"),
+        newIdentDefs(ident("source"), modelTypeIdent)
+      ],
+      body = newStmtList(newAssignment(ident("result"),
+        newCall(bindSym("toDbValue"), relationFieldAccess))))
+    relationGetterProcs.add(getterProc)
+
+    let relationConstructor = newCall(
+      newTree(nnkBracketExpr, bindSym("relationRef"),
+        modelTypeIdent, targetType),
+      newLit(field.name),
+      newLit(field.columnName),
+      newLit(field.nullable),
+      newLit(field.kind == fkOneToOne),
+      getterName)
+    relationSetConstructor.add(newTree(nnkExprColonExpr,
+      ident(field.name), relationConstructor))
+
+  let relationSetType = newTree(nnkTypeSection,
+    newTree(nnkTypeDef,
+      postfix(relationSetName, "*"),
+      newEmptyNode(),
+      newTree(nnkObjectTy, newEmptyNode(), newEmptyNode(), relationSetRecords)))
+  let relationsProc = newProc(postfix(ident("relations"), "*"),
+    params = [
+      relationSetName,
+      newIdentDefs(ident("modelType"), typedescModelType)
+    ],
+    body = newStmtList(newAssignment(ident("result"), relationSetConstructor)))
+
+  result = newStmtList(modelType, fieldSetType, relationSetType, metadataConst,
+    accessor, fieldsProc, relationGetterProcs, relationsProc, encodeProc,
     decodeProc, prepareInsertProc, prepareUpdateProc, primaryKeyProc,
     setPrimaryKeyProc)

@@ -35,3 +35,9 @@ suite "model DSL compile-time diagnostics":
     let compilation = compileFixture("duplicate_field.nim")
     check compilation.exitCode != 0
     check "BadPost.title: duplicate field declaration" in compilation.output
+
+  test "requires nullable relations for SetNull":
+    let compilation = compileFixture("set_null_not_nullable.nim")
+    check compilation.exitCode != 0
+    check "BadRelation.target: onDelete = SetNull requires nullable = true" in
+      compilation.output

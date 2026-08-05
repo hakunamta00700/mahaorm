@@ -72,6 +72,14 @@ proc columnSql(field: FieldMeta; backend: BackendKind): string =
   if defaultValue.len > 0:
     result.add(" DEFAULT " & defaultValue)
 
+proc onDeleteSql(action: OnDeleteAction): string =
+  case action
+  of Cascade: "CASCADE"
+  of Restrict: "RESTRICT"
+  of SetNull: "SET NULL"
+  of SetDefault: "SET DEFAULT"
+  of NoAction: "NO ACTION"
+
 proc indexName(tableName: string; fields: seq[FieldMeta]): string =
   "idx_" & tableName & "_" & fields.mapIt(it.columnName).join("_")
 
@@ -88,6 +96,13 @@ proc schemaSql*(meta: ModelMeta; backend: BackendKind): string =
     let columns = fieldNames.mapIt(
       quoteIdentifier(findField(meta, it).columnName, backend))
     definitions.add("UNIQUE (" & columns.join(", ") & ")")
+  for field in meta.fields:
+    if field.kind in {fkForeignKey, fkOneToOne}:
+      definitions.add("FOREIGN KEY (" &
+        quoteIdentifier(field.columnName, backend) & ") REFERENCES " &
+        quoteIdentifier(field.relationTable, backend) & " (" &
+        quoteIdentifier("id", backend) & ") ON DELETE " &
+        onDeleteSql(field.onDelete))
 
   result = "CREATE TABLE " & quoteIdentifier(meta.tableName, backend) & " (\n  " &
     definitions.join(",\n  ") & "\n)"

@@ -28,6 +28,11 @@ type
     defaultValue*: string
     dbDefault*: string
     defaultFactory*: string
+    storageName*: string
+    relationTarget*: string
+    relationTable*: string
+    relatedName*: string
+    onDelete*: OnDeleteAction
 
   ModelMeta* = object
     modelName*: string
