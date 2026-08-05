@@ -1,0 +1,15 @@
+# Nim compiler output
+nimcache/
+*.exe
+*.dll
+*.so
+*.dylib
+*.pdb
+*.ilk
+*.obj
+*.o
+*.out
+
+# Nimble local dependency/cache directories
+.nimble/
+nimbledeps/
