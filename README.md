@@ -8,8 +8,9 @@ The current `0.1.0` implementation includes:
 
 - native model types and immutable metadata with compile-time diagnostics;
 - SQLite CRUD, nested transactions, typed parameters, and structured errors;
-- a typed query AST with filtering, ordering, limits, counts, updates, deletes,
-  and inspectable parameterized SQL;
+- stateless model managers and a typed QuerySet AST with filtering, exclusion,
+  ordering, pagination, cardinality checks, updates, deletes, and inspectable
+  parameterized SQL;
 - foreign-key and one-to-one relations;
 - an opt-in PostgreSQL backend;
 - versioned schema snapshots, migration diffs, safety gates, and a CLI;

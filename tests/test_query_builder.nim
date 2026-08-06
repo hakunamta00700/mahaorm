@@ -1,4 +1,4 @@
-import std/[options, strutils, unittest]
+import std/[options, sequtils, strutils, unittest]
 
 import nimorm
 
@@ -11,11 +11,38 @@ model QueryPost:
   meta:
     tableName = "query_posts"
 
+model OrderedQueryPost:
+  title = stringField(maxLength = 200)
+  views = integerField(default = 0)
+
+  meta:
+    tableName = "ordered_query_posts"
+    ordering = @["-views", "title"]
+
 static:
   doAssert not compiles(nimOrmFields(QueryPost).views == "wrong type")
   doAssert not compiles(nimOrmFields(QueryPost).missing == 1)
+  doAssert not compiles(block:
+    proc deleteEverything(manager: Manager[QueryPost]) =
+      discard manager.delete())
 
 suite "typed query builder":
+  test "exposes standard query operations through the model manager":
+    let db = openSqlite(":memory:")
+    defer: db.close()
+    db.createTables(QueryPost)
+
+    let posts = QueryPost.objects(db)
+    let saved = posts.create(QueryPost(title: "created", views: 1))
+
+    check saved.id > 0
+    check posts.count() == 1
+    check posts.get(saved.id).title == "created"
+    check posts.getOrNone(999).isNone
+    check posts.filter(it.id == saved.id).get().title == "created"
+    check posts.exclude(it.id == saved.id).none().all().len == 0
+    check posts.contains(saved)
+
   test "filters, orders, limits, and offsets with native field types":
     let db = openSqlite(":memory:")
     defer: db.close()
@@ -68,9 +95,62 @@ suite "typed query builder":
 
     check QueryPost.objects(db).filter(it.id == firstPost.id).get().title == "first"
     check QueryPost.objects(db).filter(it.title == "missing").firstOrNone().isNone
+    check QueryPost.objects(db).filter(it.title == "missing").getOrNone().isNone
     check QueryPost.objects(db).exists()
     expect MultipleRecordsFound:
       discard QueryPost.objects(db).get()
+
+  test "applies model ordering and supports reverse and last":
+    let db = openSqlite(":memory:")
+    defer: db.close()
+    db.createTables(OrderedQueryPost)
+    discard OrderedQueryPost.objects(db).create(
+      OrderedQueryPost(title: "beta", views: 10))
+    discard OrderedQueryPost.objects(db).create(
+      OrderedQueryPost(title: "alpha", views: 20))
+    discard OrderedQueryPost.objects(db).create(
+      OrderedQueryPost(title: "alpha", views: 10))
+
+    let ordered = OrderedQueryPost.objects(db).all()
+    let baseQuery = OrderedQueryPost.objects(db).getQuerySet()
+    let reversedQuery = baseQuery.reverse()
+    check ordered.mapIt(it.title) == @["alpha", "alpha", "beta"]
+    check ordered.mapIt(it.views) == @[20, 10, 10]
+    check baseQuery.first().views == 20
+    check reversedQuery.first().title == "beta"
+    check OrderedQueryPost.objects(db).first().views == 20
+    check OrderedQueryPost.objects(db).last().title == "beta"
+    check OrderedQueryPost.objects(db).reverse().first().title == "beta"
+    check OrderedQueryPost.objects(db).orderBy(it.title.desc).first().title == "beta"
+
+  test "count and exists preserve queryset limits and offsets":
+    let db = openSqlite(":memory:")
+    defer: db.close()
+    db.createTables(QueryPost)
+    discard QueryPost.objects(db).create(QueryPost(title: "one"))
+    discard QueryPost.objects(db).create(QueryPost(title: "two"))
+    discard QueryPost.objects(db).create(QueryPost(title: "three"))
+
+    let page = QueryPost.objects(db).orderBy(it.id.asc).limit(1).offset(1)
+    check page.count() == 1
+    check page.exists()
+    check QueryPost.objects(db).limit(0).count() == 0
+    check not QueryPost.objects(db).limit(0).exists()
+
+  test "empty and sliced querysets keep writes scoped safely":
+    let db = openSqlite(":memory:")
+    defer: db.close()
+    db.createTables(QueryPost)
+    discard QueryPost.objects(db).create(QueryPost(title: "one"))
+    discard QueryPost.objects(db).create(QueryPost(title: "two"))
+
+    check QueryPost.objects(db).none().update(it.published.set(true)) == 0
+    check QueryPost.objects(db).none().delete() == 0
+    check QueryPost.objects(db).count() == 2
+    expect ValueError:
+      discard QueryPost.objects(db).limit(1).update(it.published.set(true))
+    expect ValueError:
+      discard QueryPost.objects(db).limit(1).delete()
 
   test "compiles placeholders separately from hostile values":
     let db = openSqlite(":memory:")

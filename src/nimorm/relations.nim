@@ -50,7 +50,7 @@ proc related*[Source, Target](
     target: Target;
     relation: RelationRef[Source, Target]): QuerySet[Source] =
   mixin nimOrmPrimaryKey
-  result = Source.objects(db)
+  result = Source.objects(db).getQuerySet()
   result.predicate = SqlExpression(
     kind: ekCompare,
     columnName: relation.columnName,

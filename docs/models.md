@@ -40,10 +40,12 @@ time.
 `uniqueTogether`, `indexes`, `managed`, `abstract`, and `autoPrimaryKey`.
 Composite groups refer to DSL field names, not physical column names.
 
-`ordering` is retained as metadata in `0.1.0`; queries apply ordering only when
-`orderBy` is called. `managed = false` excludes a model from generated schema
-snapshots. `abstract = true` also excludes it from snapshots. Automatic model
-inheritance is not part of the current macro.
+`ordering` is applied whenever `Model.objects(db)` creates a QuerySet. A leading
+`-` selects descending order, as in `@["-createdAt", "title"]`. Explicit
+`orderBy` calls replace the model default; subsequent calls append additional
+query-specific ordering. `managed = false` excludes a
+model from generated schema snapshots. `abstract = true` also excludes it from
+snapshots. Automatic model inheritance is not part of the current macro.
 
 ## Primary keys
 

@@ -57,21 +57,39 @@ proc delete[T](db: Database; value: T): int
 `DbValue`, `int`, `int64`, or `string` key. `update` needs a variable because
 `autoNow` may modify it.
 
-## QuerySet
+## Manager and QuerySet
 
-Create a query with `Model.objects(db)`. Query modifiers return another
-`QuerySet[T]`:
+`Model.objects(db)` returns `Manager[T]`. `getQuerySet()` creates a fresh
+`QuerySet[T]`; ordinary manager methods delegate to one automatically.
+
+```nim
+let manager: Manager[Post] = Post.objects(db)
+let query: QuerySet[Post] = manager.getQuerySet()
+```
+
+Manager and QuerySet modifiers return a `QuerySet[T]`:
 
 | Modifier | Purpose |
 | --- | --- |
 | `filter(expression)` | Add a typed predicate |
-| `orderBy(field.asc)` / `orderBy(field.desc)` | Add ordering |
+| `exclude(expression)` | Add the negated typed predicate |
+| `orderBy(field.asc)` / `orderBy(field.desc)` | Replace model ordering, then append on later calls |
+| `reverse()` | Reverse the current ordering |
 | `limit(n)` | Limit returned rows |
 | `offset(n)` | Skip rows |
+| `distinct()` | Select distinct model rows |
+| `none()` | Return an always-empty QuerySet |
 | `toSql()` | Return `CompiledQuery(sql, params)` without executing |
 
-Terminal operations are `all`, `first`, `firstOrNone`, `get`, `count`,
-`exists`, `update`, and `delete`.
+Terminal operations are `all`, `first`, `firstOrNone`, `last`, `lastOrNone`,
+`get`, `getOrNone`, `count`, `exists`, `contains`, `update`, and `delete`.
+`create(value)` persists a new model through either a manager or a query set.
+`get` and `getOrNone` accept an optional `DbValue`, `int`, `int64`, or `string`
+primary key.
+
+The manager does not expose unscoped `delete`. QuerySet update/delete reject
+`limit` or `offset` instead of executing a wider write. Counts and existence
+checks preserve filters, distinctness, limits, and offsets.
 
 Predicates include comparison operators, `between`, `inList`, `contains`,
 `startsWith`, `endsWith`, `isNull`, and `isNotNull`. Combine them with `and`,

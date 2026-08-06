@@ -30,7 +30,8 @@ expressions that later fail during code generation.
 ```text
 native model object
   -> generated serialization / validation / field references
-  -> CRUD, QuerySet, relation, and migration APIs
+  -> stateless Manager and immutable QuerySet APIs
+  -> CRUD, relation, and migration APIs
   -> backend-neutral metadata, AST, and DbValue parameters
   -> SQLite or optional PostgreSQL execution
 ```
@@ -38,6 +39,10 @@ native model object
 `DbValue` is the execution boundary for NULL, integers, floats, text, and
 binary data. Sensitive marking is metadata on a parameter; backends redact a
 copy for logging and bind the original value.
+
+`Model.objects(db)` is a stateless model-level Manager. Each manager call starts
+from a fresh QuerySet with the model's default ordering; QuerySet modifiers copy
+query state and remain independently reusable.
 
 The query builder stores an AST until a terminal operation. Compilation quotes
 metadata-derived identifiers, escapes LIKE patterns, and emits placeholders

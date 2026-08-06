@@ -13,6 +13,9 @@ once releases are tagged; until then, unreleased behavior may still change.
   parameters for text, numbers, NULL, and binary values.
 - Typed filters, ordering, pagination, cardinality operations, bulk updates,
   deletes, and inspectable SQL plus parameters.
+- Stateless model managers with standard QuerySet operations including
+  `create`, `exclude`, `reverse`, `distinct`, `none`, primary-key lookup,
+  optional lookup, last-row retrieval, and membership checks.
 - Foreign-key and one-to-one declarations with explicit forward and reverse
   relation fetches.
 - Optional PostgreSQL execution behind `-d:nimormPostgres`.

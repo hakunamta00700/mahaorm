@@ -16,9 +16,20 @@ discard db.delete(same)
 passed variable when automatic timestamp fields are present and returns the
 affected row count. Missing `get` calls raise `RecordNotFound`.
 
-## QuerySet
+## Manager and QuerySet
 
-The `it` symbol injected into `filter`, `orderBy`, and `update` exposes
+`Model.objects(db)` returns a stateless `Manager[T]`. The manager creates a
+fresh immutable `QuerySet[T]` for each operation, so filters and pagination do
+not leak between calls.
+
+```nim
+let posts = Post.objects(db)
+let saved = posts.create(Post(title: "Nim"))
+let same = posts.get(saved.id)
+let optional = posts.getOrNone(999)
+```
+
+The `it` symbol injected into `filter`, `exclude`, `orderBy`, and `update` exposes
 compile-time typed field references. Comparing a numeric field with a string or
 using an unknown field fails during compilation.
 
@@ -28,6 +39,8 @@ let query = Post.objects(db)
     (it.title.contains("Nim") and it.views >= 10) or
       it.published == true
 
+let withoutDrafts = query.exclude(it.title.startsWith("Draft:"))
+
 let posts = query
   .orderBy(it.views.desc)
   .limit(20)
@@ -35,13 +48,19 @@ let posts = query
   .all()
 ```
 
+Model `meta.ordering` is applied whenever a manager creates a query set.
+`reverse` flips that ordering, `distinct` emits `SELECT DISTINCT`, and `none`
+returns an empty query set without a database special case in application code.
+
 Supported predicates are `==`, `!=`, `<`, `<=`, `>`, `>=`, `between`,
 `inList`, `contains`, `startsWith`, `endsWith`, `isNull`, and `isNotNull`.
 Predicates combine with `and`, `or`, and `not`.
 
-Terminal APIs are `all`, `first`, `firstOrNone`, `get`, `count`, `exists`,
-`delete`, and `update`. Query `get` requires exactly one result and raises
-`MultipleRecordsFound` when two or more rows match.
+Terminal APIs are `all`, `first`, `firstOrNone`, `last`, `lastOrNone`, `get`,
+`getOrNone`, `count`, `exists`, `contains`, `delete`, and `update`. Query `get`
+requires exactly one result and raises `MultipleRecordsFound` when two or more
+rows match. `get(primaryKey)` and `getOrNone(primaryKey)` add a typed
+primary-key condition to the current query.
 
 ```nim
 discard Post.objects(db)
@@ -53,6 +72,16 @@ discard Post.objects(db)
 
 discard Post.objects(db).filter(it.published == false).delete()
 ```
+
+The manager intentionally has no direct `delete` method. Select the deletion
+scope with `filter`; Nim's `all()` materializes a sequence and therefore cannot
+be followed by `delete()`. Use `getQuerySet().delete()` only when deleting the
+complete table is deliberate. Updating or deleting a sliced query raises
+`ValueError`; silently ignoring `limit` or `offset` would widen the write.
+
+Unlike Django's lazy iterable QuerySet, nimorm uses `all()` as the explicit
+execution boundary returning `seq[T]`. Other modifiers remain lazy until a
+terminal operation runs.
 
 ## SQL inspection and safety
 
