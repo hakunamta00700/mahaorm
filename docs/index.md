@@ -32,6 +32,10 @@ Every tutorial program lives in `examples/` and is compiled by
 - [FAQ](faq.md)
 - [Architecture and design](design.md)
 - [Benchmark method and results](../benchmarks/README.md)
+- [Changelog](../CHANGELOG.md)
+- [Roadmap](../ROADMAP.md)
+- [Contributing](../CONTRIBUTING.md)
+- [Security policy](../SECURITY.md)
 
 The public API is synchronous. Version `0.1.0` does not include eager loading,
 arbitrary projection, relation traversal inside filters, async execution, or

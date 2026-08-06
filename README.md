@@ -77,6 +77,15 @@ nimble benchmark
 - [Architecture and design](docs/design.md)
 - [Benchmark method and results](benchmarks/README.md)
 
+## Project
+
+- [Changelog](CHANGELOG.md)
+- [Roadmap](ROADMAP.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [MIT license](LICENSE)
+
 ## Deliberate boundaries
 
 The API is synchronous. Async execution should be a separate backend contract
