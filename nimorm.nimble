@@ -31,3 +31,6 @@ task example, "Compile and run all examples":
 
 task benchmark, "Run the release-mode SQLite benchmark":
   exec "nim c -d:release -r --hints:off --path:src benchmarks/orm_benchmark.nim"
+
+task docs, "Check local documentation links":
+  exec "nim c -r --hints:off tools/check_docs.nim"

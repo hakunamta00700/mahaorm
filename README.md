@@ -21,8 +21,12 @@ Install or develop the package with Nimble, then import its single public entry
 point:
 
 ```shell
-nimble install
+nimble install https://github.com/hakunamta00700/mahaorm.git
 ```
+
+The package is not yet listed in the Nimble package directory. See
+[Installation](docs/installation.md) for source-development setup and the
+PostgreSQL requirements.
 
 ```nim
 import nimorm
@@ -60,6 +64,7 @@ nimble benchmark
 ## Documentation
 
 - [Documentation home](docs/index.md)
+- [Getting-started path](docs/getting-started.md)
 - [Installation](docs/installation.md)
 - [5-minute quickstart](docs/quickstart.md)
 - [Build a small blog](docs/tutorial.md)

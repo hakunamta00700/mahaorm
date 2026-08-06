@@ -7,9 +7,10 @@ schema metadata, and synchronous SQLite or PostgreSQL persistence.
 
 Follow these pages in order:
 
-1. [Installation](installation.md), 2 minutes
-2. [5-minute quickstart](quickstart.md), one model and one query
-3. [Build a small blog](tutorial.md), validation, relations, and updates
+1. [Getting-started path](getting-started.md), the short route through the docs
+2. [Installation](installation.md), 2 minutes
+3. [5-minute quickstart](quickstart.md), one model and one query
+4. [Build a small blog](tutorial.md), validation, relations, and updates
 
 Every tutorial program lives in `examples/` and is compiled by
 `nimble example`. The documentation is not asking you to trust a stale snippet.

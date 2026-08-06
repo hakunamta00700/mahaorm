@@ -3,7 +3,7 @@
 This file records user-visible changes. The project follows semantic versioning
 once releases are tagged; until then, unreleased behavior may still change.
 
-## Unreleased
+## 0.1.0 (unreleased)
 
 ### Added
 
