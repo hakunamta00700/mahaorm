@@ -22,9 +22,14 @@ Every tutorial program lives in `examples/` and is compiled by
 - [Relations](relations.md)
 - [Schema snapshots and migrations](migrations.md)
 - [SQLite and PostgreSQL](backends.md)
+- [Cookbook](cookbook.md)
 
 ## Reference and project notes
 
+- [Public API reference](api-reference.md)
+- [Migration CLI reference](cli-reference.md)
+- [Troubleshooting](troubleshooting.md)
+- [FAQ](faq.md)
 - [Architecture and design](design.md)
 - [Benchmark method and results](../benchmarks/README.md)
 

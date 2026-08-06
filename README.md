@@ -69,6 +69,11 @@ nimble benchmark
 - [Relations](docs/relations.md)
 - [Migrations](docs/migrations.md)
 - [SQLite and PostgreSQL](docs/backends.md)
+- [Cookbook](docs/cookbook.md)
+- [API reference](docs/api-reference.md)
+- [Migration CLI reference](docs/cli-reference.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [FAQ](docs/faq.md)
 - [Architecture and design](docs/design.md)
 - [Benchmark method and results](benchmarks/README.md)
 
