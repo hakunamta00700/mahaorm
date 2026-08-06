@@ -26,6 +26,7 @@ task test, "Run the Phase 1 test suite":
 
 task example, "Compile and run all examples":
   exec "nim c -r --hints:off --path:src examples/basic_model.nim"
+  exec "nim c -r --hints:off --path:src examples/quickstart.nim"
   exec "nim c -r --hints:off --path:src examples/blog.nim"
 
 task benchmark, "Run the release-mode SQLite benchmark":

@@ -59,7 +59,10 @@ nimble benchmark
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md)
+- [Documentation home](docs/index.md)
+- [Installation](docs/installation.md)
+- [5-minute quickstart](docs/quickstart.md)
+- [Build a small blog](docs/tutorial.md)
 - [Models and metadata](docs/models.md)
 - [Fields and validation](docs/fields.md)
 - [Typed queries and CRUD](docs/queries.md)
