@@ -85,6 +85,10 @@ proc onDeleteSql(action: OnDeleteAction): string =
 proc indexName*(tableName: string; fields: seq[FieldMeta]): string =
   "idx_" & tableName & "_" & fields.mapIt(it.columnName).join("_")
 
+proc constraintName*(prefix, tableName: string;
+                     columns: seq[string]): string =
+  prefix & "_" & tableName & "_" & columns.join("_")
+
 proc findField(meta: ModelMeta; fieldName: string): FieldMeta =
   for field in meta.fields:
     if field.name == fieldName:
@@ -95,12 +99,16 @@ proc findField(meta: ModelMeta; fieldName: string): FieldMeta =
 proc schemaSql*(meta: ModelMeta; backend: BackendKind): string =
   var definitions = meta.fields.mapIt(columnDefinitionSql(it, backend))
   for fieldNames in meta.uniqueTogether:
-    let columns = fieldNames.mapIt(
-      quoteIdentifier(findField(meta, it).columnName, backend))
-    definitions.add("UNIQUE (" & columns.join(", ") & ")")
+    let columnNames = fieldNames.mapIt(findField(meta, it).columnName)
+    let columns = columnNames.mapIt(quoteIdentifier(it, backend))
+    definitions.add("CONSTRAINT " & quoteIdentifier(
+      constraintName("uq", meta.tableName, columnNames), backend) &
+      " UNIQUE (" & columns.join(", ") & ")")
   for field in meta.fields:
     if field.kind in {fkForeignKey, fkOneToOne}:
-      definitions.add("FOREIGN KEY (" &
+      definitions.add("CONSTRAINT " & quoteIdentifier(
+        constraintName("fk", meta.tableName, @[field.columnName]), backend) &
+        " FOREIGN KEY (" &
         quoteIdentifier(field.columnName, backend) & ") REFERENCES " &
         quoteIdentifier(field.relationTable, backend) & " (" &
         quoteIdentifier("id", backend) & ") ON DELETE " &

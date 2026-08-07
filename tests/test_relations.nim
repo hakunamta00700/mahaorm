@@ -41,6 +41,7 @@ suite "model relations":
     doAssert typeof(default(RelationPost).authorId) is int64
     doAssert typeof(default(RelationPost).reviewerId) is Option[int64]
     let ddl = schemaSql(RelationPost, sqliteBackend)
+    check "CONSTRAINT \"fk_relation_posts_author_id\"" in ddl
     check "\"author_id\" INTEGER NOT NULL" in ddl
     check "REFERENCES \"relation_users\" (\"id\") ON DELETE CASCADE" in ddl
     check "REFERENCES \"relation_users\" (\"id\") ON DELETE SET NULL" in ddl

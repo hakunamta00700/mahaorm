@@ -1,4 +1,4 @@
-import std/[os, unittest]
+import std/[os, tempfiles, unittest]
 
 import nimorm
 import nimorm/cli/main as migration_cli
@@ -11,7 +11,7 @@ model CliItem:
 
 suite "migration CLI":
   test "creates and applies migration files through real commands":
-    let temp = getTempDir()
+    let temp = createTempDir("nimorm-cli-", "")
     let snapshotPath = temp / "nimorm-cli-current.json"
     let migrationPath = temp / "nimorm-cli-0001.json"
     let databasePath = temp / "nimorm-cli-test.sqlite3"
@@ -19,6 +19,7 @@ suite "migration CLI":
       for path in [snapshotPath, migrationPath, databasePath]:
         if fileExists(path):
           removeFile(path)
+      removeDir(temp)
 
     var snapshot = schemaSnapshot(CliItem)
     snapshot.models[0].modelName = "Item"

@@ -25,6 +25,18 @@ once releases are tagged; until then, unreleased behavior may still change.
 - Executable quickstart and blog examples, user guides, reference pages,
   troubleshooting, FAQ, and performance baselines.
 
+### Fixed
+
+- Preserve explicit non-generated primary keys during inserts and reject
+  relation target shapes that the current `int64 id` storage cannot represent.
+- Generate valid PostgreSQL offset-only queries and stable names for generated
+  foreign-key and composite-unique constraints.
+- Dependency-order table migrations, include constraints for newly added
+  relation fields, and reject unsupported constraint alterations explicitly.
+- Keep transaction depth recoverable when commit/release fails, configure
+  PostgreSQL bytea reads consistently, and isolate temporary test artifacts for
+  parallel runs.
+
 ### Known boundaries
 
 - The API is synchronous.

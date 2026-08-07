@@ -27,7 +27,9 @@ proc insert*[T](db: Database; value: T): T =
   result = value
   nimOrmPrepareInsert(result)
   let meta = getModelMeta(T)
-  let encoded = nimOrmEncode(result, includePrimaryKey = false, forInsert = true)
+  let primaryKey = primaryKeyMeta(meta)
+  let encoded = nimOrmEncode(result,
+    includePrimaryKey = not primaryKey.autoIncrement, forInsert = true)
   let sqlText =
     if encoded.columns.len == 0:
       "INSERT INTO " & quoteIdentifier(meta.tableName, db.backend) &
@@ -39,7 +41,6 @@ proc insert*[T](db: Database; value: T): T =
         markers.add(parameterMarker(db, index))
       "INSERT INTO " & quoteIdentifier(meta.tableName, db.backend) &
         " (" & columns & ") VALUES (" & markers.join(", ") & ")"
-  let primaryKey = primaryKeyMeta(meta)
   if primaryKey.autoIncrement and db.backend == postgresBackend:
     let rows = db.queryRows(sqlText & " RETURNING " &
       quoteIdentifier(primaryKey.columnName, db.backend), encoded.values)

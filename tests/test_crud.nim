@@ -19,7 +19,28 @@ model Article:
   meta:
     tableName = "articles"
 
+model ManualKeyRecord:
+  key = stringField(maxLength = 40, primaryKey = true)
+  label = stringField(maxLength = 100)
+
+  meta:
+    tableName = "manual_key_records"
+    autoPrimaryKey = false
+
 suite "SQLite model CRUD":
+  test "persists explicit non-generated primary keys":
+    let db = openSqlite(":memory:")
+    defer: db.close()
+    db.createTables(ManualKeyRecord)
+
+    var saved = db.insert(ManualKeyRecord(key: "manual-1", label: "first"))
+    check saved.key == "manual-1"
+    check db.get(ManualKeyRecord, "manual-1").label == "first"
+    saved.label = "updated"
+    check db.update(saved) == 1
+    check db.get(ManualKeyRecord, "manual-1").label == "updated"
+    check db.delete(saved) == 1
+
   test "round-trips native model fields and generated ID":
     let db = openSqlite(":memory:")
     defer: db.close()
@@ -89,3 +110,19 @@ suite "SQLite model CRUD":
     let titles = db.queryRows("SELECT \"title\" FROM \"articles\" ORDER BY \"id\"")
     check titles.len == 1
     check titles[0][0].textValue == "outer"
+
+  test "rolls back cleanly when commit fails":
+    let db = openSqlite(":memory:")
+    defer: db.close()
+    discard db.execute(
+      "CREATE TABLE parent(id INTEGER PRIMARY KEY)")
+    discard db.execute(
+      "CREATE TABLE child(parent_id INTEGER, " &
+      "FOREIGN KEY(parent_id) REFERENCES parent(id) " &
+      "DEFERRABLE INITIALLY DEFERRED)")
+
+    expect ForeignKeyViolation:
+      db.transaction:
+        discard db.execute("INSERT INTO child(parent_id) VALUES (?)", [dbValue(99)])
+    check db.transactionDepth == 0
+    check db.queryRows("SELECT COUNT(*) FROM child")[0][0].integerValue == 0

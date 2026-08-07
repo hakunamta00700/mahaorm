@@ -16,6 +16,8 @@ their API, correctness, migration, and performance costs are understood.
 
 ### Query ergonomics
 
+- presence-aware model construction so explicit `false`, `0`, and empty strings
+  remain distinguishable from omitted fields with non-zero defaults;
 - projections with typed result shapes;
 - aggregates beyond `count` and `exists`;
 - explicit eager-loading helpers that avoid hidden N+1 queries;

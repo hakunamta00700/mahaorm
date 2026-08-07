@@ -38,6 +38,13 @@ foreign keys, and composite unique constraints. Rename detection uses stable
 model and field identities with changed table/column names; removing one field
 and adding another is intentionally treated as drop/add.
 
+Initial table operations are dependency ordered, so referenced tables are
+created before their dependents and dropped afterward. Generated foreign-key
+and composite-unique constraints have stable names, which makes later removal
+portable to PostgreSQL. Cyclic foreign keys require an explicit staged
+migration. Changes to primary-key, single-column UNIQUE, or auto-increment
+semantics are rejected instead of producing incomplete ALTER SQL.
+
 ## Apply and audit
 
 The CLI currently applies migrations to SQLite:

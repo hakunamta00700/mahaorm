@@ -43,6 +43,7 @@ suite "schema generation":
     check "\"price\" NUMERIC(12, 2) NOT NULL" in generated
     check "\"active\" INTEGER NOT NULL DEFAULT 1" in generated
     check "\"createdAt\" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP" in generated
+    check "CONSTRAINT \"uq_order_name_quantity\"" in generated
     check "UNIQUE (\"name\", \"quantity\")" in generated
     check "CREATE INDEX \"idx_order_quantity\"" in generated
     check "CREATE INDEX \"idx_order_createdAt_active\"" in generated

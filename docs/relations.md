@@ -23,7 +23,11 @@ model Post:
 This emits `authorId: int64` and `reviewerId: Option[int64]`. A one-to-one
 field also adds a UNIQUE constraint. Supported policies are `Cascade`,
 `Restrict`, `SetNull`, `SetDefault`, and `NoAction`; invalid combinations such
-as non-null `SetNull` fail at compile time.
+as non-null `SetNull` or `oneToOneField(unique = false)` fail at compile time.
+
+Relation targets currently must use an `int64` primary key stored in the `id`
+column. The model macro rejects string, UUID, or custom-column targets instead
+of generating a mismatched `int64` relation field and invalid DDL.
 
 ## Forward and reverse access
 

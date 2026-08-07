@@ -88,3 +88,11 @@ proc primaryKeyField*[T](modelType: typedesc[T]): Option[FieldMeta] =
     if field.primaryKey:
       return some(field)
   none(FieldMeta)
+
+proc supportsRelationTarget*(meta: ModelMeta): bool =
+  ## Relations currently store int64 IDs and reference the conventional `id`
+  ## column. Reject other target shapes instead of emitting incorrect DDL.
+  for field in meta.fields:
+    if field.primaryKey:
+      return field.kind == fkBigInteger and field.columnName == "id"
+  false

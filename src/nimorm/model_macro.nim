@@ -348,6 +348,8 @@ proc parseField(modelName, fieldName: string; rhs: NimNode): ParsedField {.compi
       error(context & ": onDelete = SetNull requires nullable = true", rhs)
     if result.onDelete == SetDefault and not result.hasDefault:
       error(context & ": onDelete = SetDefault requires a default", rhs)
+    if result.kind == fkOneToOne and not result.unique:
+      error(context & ": oneToOneField cannot set unique = false", rhs)
   if result.hasMinValue and result.hasMaxValue and
       result.minValue > result.maxValue:
     error(context & ": minValue must not exceed maxValue", rhs)
@@ -873,6 +875,16 @@ macro model*(name: untyped; body: untyped): untyped =
     ],
     body = newStmtList(newAssignment(ident("result"), relationSetConstructor)))
 
+  var relationTargetChecks = newStmtList()
+  for field in fields:
+    if field.kind in {fkForeignKey, fkOneToOne}:
+      let targetType = field.relationTargetNode
+      let message = newLit(modelName & "." & field.name &
+        ": relation targets must use an int64 primary key stored as 'id'")
+      relationTargetChecks.add quote do:
+        static:
+          doAssert supportsRelationTarget(getModelMeta(`targetType`)), `message`
+
   var validationBody = newStmtList()
   let validationIssues = ident("result")
   for field in fields:
@@ -924,6 +936,7 @@ macro model*(name: untyped; body: untyped): untyped =
     body = validationBody)
 
   result = newStmtList(modelType, fieldSetType, relationSetType, metadataConst,
+    relationTargetChecks,
     accessor, fieldsProc, relationGetterProcs, relationsProc, encodeProc,
     decodeProc, prepareInsertProc, prepareUpdateProc, primaryKeyProc,
     setPrimaryKeyProc, validateProc)

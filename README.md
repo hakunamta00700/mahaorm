@@ -101,5 +101,11 @@ filter, and automatic model discovery are not implemented in `0.1.0`. SQLite
 schema changes that require rebuilding a table are reported explicitly instead
 of being applied through a lossy implicit rewrite.
 
+Native object literals cannot distinguish an omitted scalar from an explicitly
+provided Nim zero value. For a non-zero application default such as
+`booleanField(default = true)`, inserting `false` through a plain object literal
+currently applies the default. Use zero-valued application defaults or an
+explicit raw/after-insert update until a presence-aware constructor API lands.
+
 PostgreSQL is compiled only with `-d:nimormPostgres` and requires the libpq
 runtime. See [the backend guide](docs/backends.md) before enabling it.

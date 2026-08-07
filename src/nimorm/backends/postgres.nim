@@ -173,7 +173,14 @@ proc openPostgres*(host: string; port: int; database, user, password: string): D
     let message = postgresMessage(handle)
     pqfinish(handle)
     raise newException(ConnectionError, message)
-  Database(backend: postgresBackend, handle: cast[pointer](handle))
+  result = Database(backend: postgresBackend, handle: cast[pointer](handle))
+  try:
+    discard result.executePostgres("SET bytea_output = 'hex'")
+  except CatchableError:
+    pqfinish(handle)
+    result.closed = true
+    result.handle = nil
+    raise
 
 proc closePostgres*(db: Database) =
   if db.isNil or db.closed:

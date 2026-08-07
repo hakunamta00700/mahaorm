@@ -41,3 +41,15 @@ suite "model DSL compile-time diagnostics":
     check compilation.exitCode != 0
     check "BadRelation.target: onDelete = SetNull requires nullable = true" in
       compilation.output
+
+  test "preserves uniqueness for one-to-one relations":
+    let compilation = compileFixture("one_to_one_not_unique.nim")
+    check compilation.exitCode != 0
+    check "BadRelation.target: oneToOneField cannot set unique = false" in
+      compilation.output
+
+  test "rejects relation targets with unsupported primary keys":
+    let compilation = compileFixture("unsupported_relation_target.nim")
+    check compilation.exitCode != 0
+    check "BadRelation.target: relation targets must use an int64 primary key" in
+      compilation.output

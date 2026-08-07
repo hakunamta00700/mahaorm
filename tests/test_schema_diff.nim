@@ -1,4 +1,4 @@
-import std/[json, os, unittest]
+import std/[json, os, strutils, tempfiles, unittest]
 
 import nimorm
 
@@ -22,6 +22,25 @@ model SnapshotV2:
       @["title", "summary"]
     ]
 
+model RelationTargetSnapshot:
+  name = stringField(maxLength = 80)
+
+  meta:
+    tableName = "relation_targets"
+
+model RelationSourceV1:
+  name = stringField(maxLength = 80)
+
+  meta:
+    tableName = "relation_sources"
+
+model RelationSourceV2:
+  name = stringField(maxLength = 80)
+  target = foreignKey(RelationTargetSnapshot, onDelete = Cascade)
+
+  meta:
+    tableName = "relation_sources"
+
 proc hasOperation(migration: Migration;
                   kind: MigrationOperationKind;
                   fieldName = ""): bool =
@@ -39,7 +58,9 @@ suite "schema snapshots and diffs":
     check restored.models[0].tableName == "articles"
     check restored.models[0].fields.len == snapshot.models[0].fields.len
 
-    let path = getTempDir() / "nimorm-schema-snapshot-test.json"
+    let (tempFile, path) = createTempFile(
+      "nimorm-schema-snapshot-", ".json")
+    tempFile.close()
     defer:
       if fileExists(path):
         removeFile(path)
@@ -79,3 +100,45 @@ suite "schema snapshots and diffs":
     check dropMigration.operations.len == 1
     check dropMigration.operations[0].kind == DropTable
     check dropMigration.operations[0].destructive
+
+  test "adds the foreign-key constraint for a new relation field":
+    var previous = schemaSnapshot(RelationTargetSnapshot, RelationSourceV1)
+    var current = schemaSnapshot(RelationTargetSnapshot, RelationSourceV2)
+    previous.models[1].modelName = "RelationSource"
+    current.models[1].modelName = "RelationSource"
+
+    let migration = diffSchemas(previous, current, "0002_add_target")
+    check migration.hasOperation(AddColumn, "target")
+    check migration.hasOperation(AddForeignKey, "target")
+    let postgresSql = migration.sqlMigration(postgresBackend)
+    check "ADD COLUMN \"target_id\"" in postgresSql
+    check "ADD CONSTRAINT \"fk_relation_sources_target_id\"" in postgresSql
+    expect MigrationError:
+      discard migration.sqlMigration(sqliteBackend)
+
+  test "orders related table creation and removal by dependency":
+    let empty = SchemaSnapshot(formatVersion: 1)
+    let related = schemaSnapshot(RelationSourceV2, RelationTargetSnapshot)
+
+    let createMigration = diffSchemas(empty, related, "0001_related")
+    check createMigration.operations[0].tableName == "relation_targets"
+    check createMigration.operations[1].tableName == "relation_sources"
+
+    let dropMigration = diffSchemas(related, empty, "0002_drop_related")
+    check dropMigration.operations[0].tableName == "relation_sources"
+    check dropMigration.operations[1].tableName == "relation_targets"
+
+  test "rejects unsupported constraint changes and diffs field indexes":
+    var previous = schemaSnapshot(SnapshotV1)
+    var unsupported = previous
+    unsupported.models[0].fields[1].unique = true
+    expect MigrationError:
+      discard diffSchemas(previous, unsupported, "0002_unique")
+
+    var indexed = previous
+    indexed.models[0].fields[1].indexed = true
+    let addIndex = diffSchemas(previous, indexed, "0002_index")
+    check addIndex.hasOperation(CreateIndex, "title")
+
+    let dropIndex = diffSchemas(indexed, previous, "0003_index")
+    check dropIndex.hasOperation(DropIndex, "title")

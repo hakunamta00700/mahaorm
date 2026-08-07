@@ -48,7 +48,7 @@ proc main() =
         score: index))
       checksum += item.id
 
-  discard BenchItem.objects(db).delete()
+  discard BenchItem.objects(db).getQuerySet().delete()
   measure("ORM transaction INSERT", bulkCount):
     db.transaction:
       for index in 0 ..< bulkCount:

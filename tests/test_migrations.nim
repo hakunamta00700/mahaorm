@@ -1,4 +1,4 @@
-import std/[os, strutils, unittest]
+import std/[os, strutils, tempfiles, unittest]
 
 import nimorm
 
@@ -54,7 +54,8 @@ suite "migration execution and history":
     var current = schemaSnapshot(MigratedItem)
     current.models[0].modelName = "Item"
     let migration = diffSchemas(empty, current, "0001_initial")
-    let path = getTempDir() / "nimorm-migration-test.json"
+    let (tempFile, path) = createTempFile("nimorm-migration-", ".json")
+    tempFile.close()
     defer:
       if fileExists(path):
         removeFile(path)

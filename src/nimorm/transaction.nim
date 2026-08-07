@@ -17,22 +17,24 @@ proc beginTransaction*(db: Database) =
 proc commitTransaction*(db: Database) =
   if db.transactionDepth <= 0:
     raise newException(TransactionError, "no transaction is active")
-  dec db.transactionDepth
-  if db.transactionDepth == 0:
+  let nextDepth = db.transactionDepth - 1
+  if nextDepth == 0:
     discard db.execute("COMMIT")
   else:
-    discard db.execute("RELEASE SAVEPOINT " & savepointName(db.transactionDepth))
+    discard db.execute("RELEASE SAVEPOINT " & savepointName(nextDepth))
+  db.transactionDepth = nextDepth
 
 proc rollbackTransaction*(db: Database) =
   if db.transactionDepth <= 0:
     raise newException(TransactionError, "no transaction is active")
-  dec db.transactionDepth
-  if db.transactionDepth == 0:
+  let nextDepth = db.transactionDepth - 1
+  if nextDepth == 0:
     discard db.execute("ROLLBACK")
   else:
-    let savepoint = savepointName(db.transactionDepth)
+    let savepoint = savepointName(nextDepth)
     discard db.execute("ROLLBACK TO SAVEPOINT " & savepoint)
     discard db.execute("RELEASE SAVEPOINT " & savepoint)
+  db.transactionDepth = nextDepth
 
 template transaction*(db: Database; body: untyped): untyped =
   {.push warning[UnreachableCode]: off.}

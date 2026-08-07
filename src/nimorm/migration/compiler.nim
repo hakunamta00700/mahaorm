@@ -12,9 +12,6 @@ proc fieldByName(model: ModelSnapshot; name: string): FieldSnapshot =
   raise newException(MigrationError,
     model.modelName & "." & name & ": migration field not found")
 
-proc constraintName(prefix, tableName: string; fields: seq[string]): string =
-  prefix & "_" & tableName & "_" & fields.join("_")
-
 proc onDeleteSql(action: OnDeleteAction): string =
   case action
   of Cascade: "CASCADE"
@@ -100,9 +97,10 @@ proc operationSql*(operation: MigrationOperation;
       raise newException(MigrationError,
         operation.modelName &
         ": SQLite AddUniqueConstraint requires an explicit table-rebuild migration")
-    let columns = operation.fields.mapIt(quoteIdentifier(
-      operation.model.fieldByName(it).columnName, backend))
-    let name = constraintName("uq", operation.tableName, operation.fields)
+    let columnNames = operation.fields.mapIt(
+      operation.model.fieldByName(it).columnName)
+    let columns = columnNames.mapIt(quoteIdentifier(it, backend))
+    let name = constraintName("uq", operation.tableName, columnNames)
     result.add("ALTER TABLE " & table & " ADD CONSTRAINT " &
       quoteIdentifier(name, backend) & " UNIQUE (" & columns.join(", ") & ")")
   of DropUniqueConstraint:
@@ -110,7 +108,9 @@ proc operationSql*(operation: MigrationOperation;
       raise newException(MigrationError,
         operation.modelName &
         ": SQLite DropUniqueConstraint requires an explicit table-rebuild migration")
-    let name = constraintName("uq", operation.tableName, operation.fields)
+    let columnNames = operation.fields.mapIt(
+      operation.model.fieldByName(it).columnName)
+    let name = constraintName("uq", operation.tableName, columnNames)
     result.add("ALTER TABLE " & table & " DROP CONSTRAINT " &
       quoteIdentifier(name, backend))
 

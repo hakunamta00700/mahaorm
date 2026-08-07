@@ -129,7 +129,7 @@ proc orderSql[T](query: QuerySet[T]): string =
 proc rangeSql[T](query: QuerySet[T]): string =
   if query.limitValue.isSome:
     result.add(" LIMIT " & $query.limitValue.get)
-  elif query.offsetValue > 0:
+  elif query.offsetValue > 0 and query.db.backend == sqliteBackend:
     result.add(" LIMIT -1")
   if query.offsetValue > 0:
     result.add(" OFFSET " & $query.offsetValue)
